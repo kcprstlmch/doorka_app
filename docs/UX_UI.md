@@ -43,6 +43,10 @@ Moi Klienci, lista klientów z tabeli `clients`,
 Statystyka, automatyczne dane pobierane dot. umówionych spotkań / spisanych umów / klientów dodanych do Moi Klienci / spadów
 Ustawienia / preferencje konta
 
+Ekrany głównych sekcji nie mają osobnego górnego nagłówka z nazwą sekcji.
+Po wejściu w Dashboard, Kontakty, Statystykę, Moi Klienci albo Konto nie pokazujemy dodatkowego wiersza/kafelka z tytułem ekranu.
+Treść sekcji zaczyna się od razu od właściwego modułu albo listy.
+
 ## Kafelki kontaktów
 Na kafelku kontaktu nie pokazujemy pełnego adresu ani numeru telefonu.
 Numer telefonu jest reprezentowany przez zieloną ikonę słuchawki, jeśli numer istnieje.
@@ -64,7 +68,7 @@ W zakładce Moi Klienci przesunięcie klienta w prawo odsłania akcję przywróc
 W tej sekcji agent widzi wszystkie najważniejsze informacje dot. jego pracy, tj.
 1. Aktywny kafelek (czarne tło, białe napisy), który automatycznie po jego kliknięciu umożliwia dodanie spotkania (zielony przycisk, białe napisy), w tym kafelku (jeżeli mamy dzień umawiania spotkań) wyświetla się informacja o aktualnej statystyce danego dnia, np. Umówione spotkania: 3, cel na dziś 9. Pod spodem, jakiś cytat motywacyjny losowy wybierany z jakiejś ogólnodostępnej listy (najprawdopodobniej ja taką stworzę). Kafelek po kliknięciu przycisku Dodaj spotkanie nie znika
 
-Aktywny kafelek ma być widoczny między nagłówkiem Dashboardu a kafelkami statystyk z kontaktami, klientami i spotkaniami.
+Aktywny kafelek ma być widoczny na początku treści Dashboardu, przed kafelkami statystyk z kontaktami, klientami i spotkaniami.
 Na tym etapie nie usuwamy Przycisku Szybkiej Akcji.
 Docelowo przycisk akcji w aktywnym kafelku powinien zależeć od trybu pracy agenta: umawiania spotkań albo odbywania spotkań.
 Aktywny kafelek dzieli się na dwie części: po lewej treść dnia, po prawej przycisk akcji.
@@ -73,30 +77,48 @@ Przycisk po prawej nie powinien być szeroki ani poziomy.
 Przycisk Start ma mieć zielone tło, białą ikonę i biały napis.
 Przycisk Start ma być jasnozielony, mniejszy i okrągły.
 Ma wyglądać jak wyraźny element do kliknięcia, a nie klasyczny przycisk tekstowy.
+Użytkownik nie może rozpocząć leadowania bez podania celu.
+Jeśli agent kliknie Start bez ustawionego celu, aplikacja nie pokazuje popupu.
+Zamiast popupu przycisk "Ustal cel" powinien zapulsować, żeby ograniczać liczbę okienek wyskakujących w aplikacji.
 Na etapie testowym aktywny kafelek pokazuje dzień leadowania.
 Nagłówek kafelka pokazuje dzisiejszą datę i dzień tygodnia w formacie `14.06 | Niedziela`.
 Główna treść kafelka to "Leadowanie".
 Cel na dzisiaj nie pokazuje liczby, dopóki agent nie kliknie "Ustal cel" i nie poda wartości.
 Przycisk "Ustal cel" ma być widoczny jako przycisk, a nie jako zwykły napis.
 Przycisk "Ustal cel" ma mieć niebieskie tło, biały napis oraz ikonę check.
+Po ustawieniu celu aktywny kafelek pokazuje:
+- cel na dzisiaj
+Po kliknięciu Start aktywny kafelek pokazuje dodatkowo:
+- obecnie umówione spotkania w tej sesji
+- kontakty dodane w tej sesji
+Kontakty w sesji leadowania liczą kontakty dodane ze statusami: Szybki kontakt, Zainteresowany, Do podjechania, Do zadzwonienia.
 Docelowo system powinien wiedzieć z onboardingu albo ustawień, czy dany dzień jest dniem leadowania, sprzedaży, organizacji, odpoczynku albo regeneracji.
 W dzień organizacji albo odpoczynku aktywny kafelek leadowania nie powinien się pojawiać.
-Po kliknięciu przycisku rozpoczęcia leadowania pod aktywnym kafelkiem pojawiają się szybkie akcje:
-- Umów spotkanie
+Po kliknięciu przycisku rozpoczęcia leadowania przycisk "Umów" pojawia się w aktywnym kafelku po prawej stronie, w miejscu przycisku Start.
+Pod aktywnym kafelkiem pojawiają się szybkie akcje:
 - Szybki kontakt
 - Szybka notatka
-- Odwołaj spotkanie
+- Zapisz teren
 Szybkie akcje pod aktywnym kafelkiem są ułożone w jednym rzędzie i zajmują całą szerokość ekranu.
 Każda szybka akcja ma inne obramowanie.
+Akcja "Umów spotkanie" korzysta z tego samego formularza dodawania kontaktu, ale otwiera go od razu ze statusem Umówione spotkanie.
+Akcja "Szybki kontakt" korzysta z tego samego formularza dodawania kontaktu, ale otwiera go od razu ze statusem Szybki kontakt.
+Akcja "Szybka notatka" otwiera prosty input tekstowy bez dodatkowych pól.
+Szybka notatka pojawia się na Dashboardzie jako osobny kafelek/lista notatek.
+Po prawej stronie notatki jest przycisk X.
+Kliknięcie X usuwa szybką notatkę permanentnie z aplikacji.
 Po kliknięciu przycisku Start aktywny kafelek pokazuje licznik czasu leadowania w formacie stopera `00:00:00`.
 Licznik czasu pojawia się obok napisu "Czas leadowania" i jest oddzielony znakiem `|`.
-Po rozpoczęciu leadowania przycisk Start zmienia się w przycisk "Przerwa" z ikoną pauzy.
+Po rozpoczęciu leadowania przycisk Przerwa nie jest na aktywnym kafelku.
+Przycisk Przerwa pojawia się po prawej stronie rzędu szybkich akcji pod aktywnym kafelkiem.
+Przycisk Przerwa ma czerwone obramowanie, czerwony akcent i przezroczyste albo jasne tło.
 Po kliknięciu "Przerwa" aplikacja pokazuje dwa przyciski: "Wznów" oraz "Koniec".
 Kliknięcie "Wznów" kontynuuje licznik.
 Kliknięcie "Koniec" kończy aktualną sesję leadowania.
 Po kliknięciu "Koniec" aplikacja pokazuje popup gratulujący zakończenia leadowania.
 Nagłówek popupu końca sesji ma kończyć się wykrzyknikiem.
 Popup powinien gratyfikować agenta animacją celebracji/fajerwerków.
+Efekt celebracji ma odbywać się za popupem, w tle, a nie jako element wewnątrz treści popupu.
 Popup podsumowania sesji pokazuje:
 - liczbę umówionych spotkań
 - liczbę zebranych kontaktów
@@ -105,6 +127,7 @@ Popup podsumowania sesji pokazuje:
 Dane z popupu zakończenia sesji powinny automatycznie zapisywać się do statystyk agenta.
 
 Sekcja "Umówione na jutro" ma mieć taki sam mechanizm zwijania i rozwijania jak "Ostatnio dodane kontakty".
+Po dodaniu umówionego spotkania przez akcję leadowania kontakt powinien pojawić się w kafelku "Umówione na jutro", jeśli termin spotkania wypada jutro.
 
 2. Umówione spotkania. Pod aktywnym kafelkiem lista umówionych już obecnie spotkań. 9 wierszy po 2 kafelki. 
 
@@ -150,3 +173,15 @@ Na podstawie tych danych powyżej agent jest w stanie stwierdzić na jakim etapi
 - Brak gradientów, błysków, efektów — płaski design
 - Spójność kolorystyczna w całej apce
 - Cień przycisku zawsze w kolorze przycisku (rgba), nie czarny
+
+## Statystyka
+Przełączniki zakresu statystyk: Łącznie, Rok, Miesiąc, Tydzień, Dzień mają zajmować 100% szerokości dostępnej kolumny.
+Przełączniki zakresu są bez obramowania, jako tekst.
+Aktywny zakres jest pogrubiony.
+Kafelki statystyk mają układać się po 2 w rzędzie, czyli po 50% szerokości dostępnej kolumny.
+Na obecnym etapie statystyka pokazuje podstawowe kafelki:
+- dodane kontakty
+- Moi Klienci
+- spisani klienci
+- łączny czas leadowania
+- liczba sesji leadowania

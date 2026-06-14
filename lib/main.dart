@@ -24,6 +24,8 @@ Future<void> main() async {
 
 SupabaseClient get _supabase => Supabase.instance.client;
 
+final List<Map<String, dynamic>> _localLeadSessions = [];
+
 class DoorkaApp extends StatelessWidget {
   const DoorkaApp({super.key});
 
@@ -836,7 +838,11 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isLeadDayPaused = false;
   bool _areTomorrowMeetingsCollapsed = false;
   bool _showAllRecentContacts = false;
+  bool _pulseGoalButton = false;
   int? _dailyGoal;
+  int _sessionScheduledMeetings = 0;
+  int _sessionCollectedContacts = 0;
+  final List<String> _quickNotes = [];
   Duration _leadDayElapsed = Duration.zero;
   Duration _leadDayBreakElapsed = Duration.zero;
   Timer? _leadDayTimer;
@@ -865,10 +871,10 @@ class _DashboardPageState extends State<DashboardPage> {
       _supabase.from('clients').select().isFilter('archived_at', null),
     ]);
 
-    final contacts = (results[0] as List)
+    final contacts = results[0]
         .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
         .toList();
-    final clients = (results[1] as List)
+    final clients = results[1]
         .map((item) => Client.fromMap(Map<String, dynamic>.from(item)))
         .toList();
 
@@ -880,6 +886,14 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void _startLeadDay() {
+    if (_dailyGoal == null) {
+      setState(() => _pulseGoalButton = true);
+      Future.delayed(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => _pulseGoalButton = false);
+      });
+      return;
+    }
+
     _leadDayTimer?.cancel();
     _leadDayBreakTimer?.cancel();
     setState(() {
@@ -887,6 +901,8 @@ class _DashboardPageState extends State<DashboardPage> {
       _isLeadDayPaused = false;
       _leadDayElapsed = Duration.zero;
       _leadDayBreakElapsed = Duration.zero;
+      _sessionScheduledMeetings = 0;
+      _sessionCollectedContacts = 0;
     });
     _leadDayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _isLeadDayPaused) return;
@@ -915,6 +931,13 @@ class _DashboardPageState extends State<DashboardPage> {
     _leadDayBreakTimer?.cancel();
     _leadDayTimer = null;
     _leadDayBreakTimer = null;
+    _localLeadSessions.add({
+      'session_date': _dateOnly(DateTime.now()),
+      'scheduled_meetings_count': _sessionScheduledMeetings,
+      'collected_contacts_count': _sessionCollectedContacts,
+      'work_seconds': workTime.inSeconds,
+      'break_seconds': breakTime.inSeconds,
+    });
     setState(() {
       _isLeadDayStarted = false;
       _isLeadDayPaused = false;
@@ -936,8 +959,8 @@ class _DashboardPageState extends State<DashboardPage> {
       await _supabase.from('lead_sessions').insert({
         'agent_id': userId,
         'session_date': _dateOnly(DateTime.now()),
-        'scheduled_meetings_count': 0,
-        'collected_contacts_count': 0,
+        'scheduled_meetings_count': _sessionScheduledMeetings,
+        'collected_contacts_count': _sessionCollectedContacts,
         'work_seconds': workTime.inSeconds,
         'break_seconds': breakTime.inSeconds,
       });
@@ -953,32 +976,48 @@ class _DashboardPageState extends State<DashboardPage> {
     await showDialog<void>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('Gratulacje, leadowanie zakończone!'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const _CelebrationBurst(),
-              const SizedBox(height: 12),
-              const Text('Podsumowanie tej sesji:'),
-              const SizedBox(height: 14),
-              _SummaryRow(label: 'Umówione spotkania', value: '0'),
-              _SummaryRow(label: 'Zebrane kontakty', value: '0'),
-              _SummaryRow(
-                label: 'Czas pracy',
-                value: _formatDuration(workTime),
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            const Positioned.fill(child: _CelebrationBurst()),
+            AlertDialog(
+              title: const Text('Gratulacje, leadowanie zakończone!'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Podsumowanie tej sesji:'),
+                  const SizedBox(height: 14),
+                  _SummaryRow(
+                    label: 'Umówione spotkania',
+                    value: _sessionScheduledMeetings.toString(),
+                  ),
+                  _SummaryRow(
+                    label: 'Zebrane kontakty',
+                    value: _sessionCollectedContacts.toString(),
+                  ),
+                  if (_dailyGoal != null)
+                    _SummaryRow(
+                      label: 'Cel na dzisiaj',
+                      value:
+                          '${_sessionScheduledMeetings.toString()} / ${_dailyGoal.toString()}',
+                    ),
+                  _SummaryRow(
+                    label: 'Czas pracy',
+                    value: _formatDuration(workTime),
+                  ),
+                  _SummaryRow(
+                    label: 'Czas przerwy',
+                    value: _formatDuration(breakTime),
+                  ),
+                ],
               ),
-              _SummaryRow(
-                label: 'Czas przerwy',
-                value: _formatDuration(breakTime),
-              ),
-            ],
-          ),
-          actions: [
-            FilledButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Zamknij'),
+              actions: [
+                FilledButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Zamknij'),
+                ),
+              ],
             ),
           ],
         );
@@ -1019,18 +1058,69 @@ class _DashboardPageState extends State<DashboardPage> {
 
     if (goal == null || goal <= 0) return;
 
-    setState(() => _dailyGoal = goal);
+    setState(() {
+      _dailyGoal = goal;
+      _pulseGoalButton = false;
+    });
+  }
+
+  Future<void> _openLeadContactForm(String status) async {
+    final saved = await showAddContactSheet(context, initialStatus: status);
+    if (!mounted || saved != true) return;
+
+    setState(() {
+      _dashboardFuture = _fetchDashboardData();
+      if (status == 'scheduled_meeting') {
+        _sessionScheduledMeetings++;
+      } else if (status == 'quick_contact' ||
+          status == 'interested' ||
+          status == 'to_visit' ||
+          status == 'to_call') {
+        _sessionCollectedContacts++;
+      }
+    });
+  }
+
+  Future<void> _addQuickNote() async {
+    final controller = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Szybka notatka'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            minLines: 2,
+            maxLines: 4,
+            decoration: const InputDecoration(labelText: 'Treść notatki'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Anuluj'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: const Text('Dodaj'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+
+    if (note == null || note.isEmpty) return;
+    setState(() => _quickNotes.insert(0, note));
+  }
+
+  void _deleteQuickNote(int index) {
+    setState(() => _quickNotes.removeAt(index));
   }
 
   @override
   Widget build(BuildContext context) {
     return _PageShell(
-      title: 'Dashboard',
-      action: IconButton(
-        tooltip: 'Odśwież',
-        onPressed: _reload,
-        icon: const Icon(Icons.refresh),
-      ),
       child: FutureBuilder<_DashboardData>(
         future: _dashboardFuture,
         builder: (context, snapshot) {
@@ -1077,15 +1167,32 @@ class _DashboardPageState extends State<DashboardPage> {
                   isStarted: _isLeadDayStarted,
                   isPaused: _isLeadDayPaused,
                   elapsed: _leadDayElapsed,
+                  currentMeetings: _sessionScheduledMeetings,
+                  currentContacts: _sessionCollectedContacts,
+                  shouldPulseGoalButton: _pulseGoalButton,
                   onStart: _startLeadDay,
-                  onPause: _pauseLeadDay,
-                  onResume: _resumeLeadDay,
-                  onFinish: _finishLeadDay,
+                  onScheduleMeeting: () =>
+                      _openLeadContactForm('scheduled_meeting'),
                   onSetGoal: _setDailyGoal,
                 ),
                 if (_isLeadDayStarted) ...[
                   const SizedBox(height: 10),
-                  const _LeadDayActions(),
+                  _LeadDayActions(
+                    isPaused: _isLeadDayPaused,
+                    onQuickContact: () => _openLeadContactForm('quick_contact'),
+                    onQuickNote: _addQuickNote,
+                    onSaveArea: () {},
+                    onPause: _pauseLeadDay,
+                    onResume: _resumeLeadDay,
+                    onFinish: _finishLeadDay,
+                  ),
+                ],
+                if (_quickNotes.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _QuickNotesList(
+                    notes: _quickNotes,
+                    onDelete: _deleteQuickNote,
+                  ),
                 ],
                 const SizedBox(height: 16),
                 _DashboardNumbers(
@@ -1134,10 +1241,11 @@ class _ActiveDashboardTile extends StatelessWidget {
     required this.isStarted,
     required this.isPaused,
     required this.elapsed,
+    required this.currentMeetings,
+    required this.currentContacts,
+    required this.shouldPulseGoalButton,
     required this.onStart,
-    required this.onPause,
-    required this.onResume,
-    required this.onFinish,
+    required this.onScheduleMeeting,
     required this.onSetGoal,
   });
 
@@ -1146,10 +1254,11 @@ class _ActiveDashboardTile extends StatelessWidget {
   final bool isStarted;
   final bool isPaused;
   final Duration elapsed;
+  final int currentMeetings;
+  final int currentContacts;
+  final bool shouldPulseGoalButton;
   final VoidCallback onStart;
-  final VoidCallback onPause;
-  final VoidCallback onResume;
-  final VoidCallback onFinish;
+  final VoidCallback onScheduleMeeting;
   final VoidCallback onSetGoal;
 
   @override
@@ -1223,7 +1332,7 @@ class _ActiveDashboardTile extends StatelessWidget {
                   spacing: 10,
                   runSpacing: 6,
                   children: [
-                    if (dailyGoal != null)
+                    if (isStarted && dailyGoal != null)
                       Text(
                         'Cel na dzisiaj: $dailyGoal',
                         style: const TextStyle(
@@ -1231,39 +1340,108 @@ class _ActiveDashboardTile extends StatelessWidget {
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF2563A9),
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(0, 34),
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(999),
+                    if (isStarted && dailyGoal != null)
+                      Text(
+                        'Obecnie: $currentMeetings',
+                        style: const TextStyle(
+                          color: Color(0xFFDDEADF),
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      onPressed: onSetGoal,
-                      icon: const Icon(Icons.check, size: 16),
-                      label: const Text(
-                        'Ustal cel',
-                        style: TextStyle(fontWeight: FontWeight.w900),
+                    if (dailyGoal != null)
+                      Text(
+                        'Kontakty: $currentContacts',
+                        style: const TextStyle(
+                          color: Color(0xFFDDEADF),
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
+                    if (!isStarted && dailyGoal == null)
+                      _SetGoalButton(
+                        pulsing: shouldPulseGoalButton,
+                        onPressed: onSetGoal,
+                      ),
                   ],
                 ),
               ],
             ),
           ),
           const SizedBox(width: 14),
-          _LeadTimerControls(
-            isStarted: isStarted,
-            isPaused: isPaused,
-            onStart: onStart,
-            onPause: onPause,
-            onResume: onResume,
-            onFinish: onFinish,
-          ),
+          _LeadTimerControls(isStarted: isStarted, onStart: onStart),
+          if (isStarted) _ActiveScheduleButton(onPressed: onScheduleMeeting),
         ],
+      ),
+    );
+  }
+}
+
+class _ActiveScheduleButton extends StatelessWidget {
+  const _ActiveScheduleButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 70,
+      height: 70,
+      child: FilledButton(
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF62BE72),
+          foregroundColor: Colors.white,
+          padding: EdgeInsets.zero,
+          shape: const CircleBorder(),
+        ),
+        onPressed: onPressed,
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.event_available_outlined, size: 22),
+            SizedBox(height: 2),
+            Text(
+              'Umów',
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SetGoalButton extends StatelessWidget {
+  const _SetGoalButton({required this.pulsing, required this.onPressed});
+
+  final bool pulsing;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(pulsing),
+      tween: Tween(begin: 1, end: pulsing ? 1.14 : 1),
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutBack,
+      builder: (context, scale, child) {
+        return Transform.scale(scale: scale, child: child);
+      },
+      child: FilledButton.icon(
+        style: FilledButton.styleFrom(
+          backgroundColor: const Color(0xFF2563A9),
+          foregroundColor: Colors.white,
+          minimumSize: const Size(0, 34),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        onPressed: onPressed,
+        icon: const Icon(Icons.check, size: 16),
+        label: const Text(
+          'Ustal cel',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
       ),
     );
   }
@@ -1277,47 +1455,19 @@ String _formatDuration(Duration duration) {
 }
 
 class _LeadTimerControls extends StatelessWidget {
-  const _LeadTimerControls({
-    required this.isStarted,
-    required this.isPaused,
-    required this.onStart,
-    required this.onPause,
-    required this.onResume,
-    required this.onFinish,
-  });
+  const _LeadTimerControls({required this.isStarted, required this.onStart});
 
   final bool isStarted;
-  final bool isPaused;
   final VoidCallback onStart;
-  final VoidCallback onPause;
-  final VoidCallback onResume;
-  final VoidCallback onFinish;
 
   @override
   Widget build(BuildContext context) {
-    if (isStarted && isPaused) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _LeadControlButton(
-            label: 'Wznów',
-            icon: Icons.play_arrow_rounded,
-            onPressed: onResume,
-          ),
-          const SizedBox(height: 8),
-          _LeadControlButton(
-            label: 'Koniec',
-            icon: Icons.stop_rounded,
-            onPressed: onFinish,
-          ),
-        ],
-      );
-    }
+    if (isStarted) return const SizedBox.shrink();
 
     return _LeadControlButton(
-      label: isStarted ? 'Przerwa' : 'Start',
-      icon: isStarted ? Icons.pause_rounded : Icons.play_arrow_rounded,
-      onPressed: isStarted ? onPause : onStart,
+      label: 'Start',
+      icon: Icons.play_arrow_rounded,
+      onPressed: onStart,
       large: true,
     );
   }
@@ -1381,19 +1531,67 @@ class _LeadControlButton extends StatelessWidget {
 }
 
 class _LeadDayActions extends StatelessWidget {
-  const _LeadDayActions();
+  const _LeadDayActions({
+    required this.isPaused,
+    required this.onQuickContact,
+    required this.onQuickNote,
+    required this.onSaveArea,
+    required this.onPause,
+    required this.onResume,
+    required this.onFinish,
+  });
+
+  final bool isPaused;
+  final VoidCallback onQuickContact;
+  final VoidCallback onQuickNote;
+  final VoidCallback onSaveArea;
+  final VoidCallback onPause;
+  final VoidCallback onResume;
+  final VoidCallback onFinish;
 
   @override
   Widget build(BuildContext context) {
-    const actions = [
-      _LeadDayAction(Icons.event_available_outlined, 'Umów', Color(0xFF2F5D50)),
+    final actions = [
       _LeadDayAction(
         Icons.person_add_alt_1_outlined,
-        'Kontakt',
-        Color(0xFF3B6EA8),
+        'Szybki kontakt',
+        const Color(0xFF3B6EA8),
+        onQuickContact,
       ),
-      _LeadDayAction(Icons.edit_note_outlined, 'Notatka', Color(0xFF8A6F20)),
-      _LeadDayAction(Icons.event_busy_outlined, 'Odwołaj', Color(0xFFA8473B)),
+      _LeadDayAction(
+        Icons.edit_note_outlined,
+        'Notatka',
+        const Color(0xFF8A6F20),
+        onQuickNote,
+      ),
+      _LeadDayAction(
+        Icons.map_outlined,
+        'Zapisz teren',
+        const Color(0xFF6D6A75),
+        onSaveArea,
+      ),
+      if (isPaused) ...[
+        _LeadDayAction(
+          Icons.play_arrow_rounded,
+          'Wznów',
+          const Color(0xFF2F5D50),
+          onResume,
+        ),
+        _LeadDayAction(
+          Icons.stop_rounded,
+          'Koniec',
+          const Color(0xFFA8473B),
+          onFinish,
+          filled: true,
+        ),
+      ] else
+        _LeadDayAction(
+          Icons.pause_rounded,
+          'Przerwa',
+          const Color(0xFFA8473B),
+          onPause,
+          filled: true,
+        ),
     ];
 
     return Row(
@@ -1418,17 +1616,23 @@ class _LeadDayActionButton extends StatelessWidget {
       height: 76,
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF172019),
+          backgroundColor: action.filled ? action.color : Colors.white,
+          foregroundColor: action.filled
+              ? Colors.white
+              : const Color(0xFF172019),
           side: BorderSide(color: action.color, width: 1.5),
           padding: const EdgeInsets.symmetric(horizontal: 6),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        onPressed: () {},
+        onPressed: action.onPressed,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(action.icon, size: 20, color: action.color),
+            Icon(
+              action.icon,
+              size: 20,
+              color: action.filled ? Colors.white : action.color,
+            ),
             const SizedBox(height: 5),
             Text(
               action.label,
@@ -1444,11 +1648,19 @@ class _LeadDayActionButton extends StatelessWidget {
 }
 
 class _LeadDayAction {
-  const _LeadDayAction(this.icon, this.label, this.color);
+  const _LeadDayAction(
+    this.icon,
+    this.label,
+    this.color,
+    this.onPressed, {
+    this.filled = false,
+  });
 
   final IconData icon;
   final String label;
   final Color color;
+  final VoidCallback onPressed;
+  final bool filled;
 }
 
 class _DashboardNumbers extends StatelessWidget {
@@ -1597,6 +1809,62 @@ class _DashboardList extends StatelessWidget {
   }
 }
 
+class _QuickNotesList extends StatelessWidget {
+  const _QuickNotesList({required this.notes, required this.onDelete});
+
+  final List<String> notes;
+  final ValueChanged<int> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFD8D4CA)),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Szybkie notatki',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 10),
+          for (var index = 0; index < notes.length; index++) ...[
+            if (index > 0) const Divider(height: 10, color: Color(0xFFE4E0D7)),
+            Material(
+              color: const Color(0xFFFAF9F5),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        notes[index],
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Usuń notatkę',
+                      onPressed: () => onDelete(index),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _SummaryRow extends StatelessWidget {
   const _SummaryRow({required this.label, required this.value});
 
@@ -1622,50 +1890,38 @@ class _CelebrationBurst extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 82,
+    return IgnorePointer(
       child: TweenAnimationBuilder<double>(
         tween: Tween(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 900),
+        duration: const Duration(milliseconds: 1100),
         curve: Curves.easeOutBack,
         builder: (context, value, _) {
-          return Stack(
-            alignment: Alignment.center,
-            children: [
-              Transform.scale(
-                scale: 0.8 + value * 0.25,
-                child: Container(
-                  width: 58,
-                  height: 58,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0C857).withValues(alpha: 0.24),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.celebration,
-                    color: Color(0xFF2F5D50),
-                    size: 34,
-                  ),
-                ),
-              ),
-              for (final item in const [
-                _BurstItem(-54, -22, Color(0xFFF0C857)),
-                _BurstItem(50, -20, Color(0xFF62BE72)),
-                _BurstItem(-42, 30, Color(0xFF2563A9)),
-                _BurstItem(44, 28, Color(0xFFA8473B)),
-              ])
-                Transform.translate(
-                  offset: Offset(item.dx * value, item.dy * value),
-                  child: Opacity(
-                    opacity: (1 - value * 0.15).clamp(0, 1),
-                    child: Icon(
-                      Icons.auto_awesome,
-                      color: item.color,
-                      size: 18,
+          return Container(
+            color: Colors.transparent,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                for (final item in const [
+                  _BurstItem(-130, -150, Color(0xFFF0C857)),
+                  _BurstItem(140, -140, Color(0xFF62BE72)),
+                  _BurstItem(-150, 120, Color(0xFF2563A9)),
+                  _BurstItem(150, 130, Color(0xFFA8473B)),
+                  _BurstItem(0, -190, Color(0xFFEAF3EC)),
+                  _BurstItem(0, 185, Color(0xFFF0C857)),
+                ])
+                  Transform.translate(
+                    offset: Offset(item.dx * value, item.dy * value),
+                    child: Opacity(
+                      opacity: (1 - value * 0.05).clamp(0, 1),
+                      child: Icon(
+                        Icons.auto_awesome,
+                        color: item.color,
+                        size: 24 + value * 8,
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           );
         },
       ),
@@ -1879,7 +2135,6 @@ class _ClientsPageState extends State<ClientsPage> {
   @override
   Widget build(BuildContext context) {
     return _PageShell(
-      title: 'Moi Klienci',
       child: FutureBuilder<List<Client>>(
         future: _clientsFuture,
         builder: (context, snapshot) {
@@ -2739,20 +2994,6 @@ class _ContactsPageState extends State<ContactsPage> {
   @override
   Widget build(BuildContext context) {
     return _PageShell(
-      title: 'Kontakty',
-      action: _selectedContactIds.isEmpty
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('${_selectedContactIds.length}'),
-                IconButton(
-                  tooltip: 'Przenieś zaznaczone do archiwum',
-                  onPressed: _archiveSelected,
-                  icon: const Icon(Icons.delete_outline),
-                ),
-              ],
-            ),
       child: FutureBuilder<List<Contact>>(
         future: _contactsFuture,
         builder: (context, snapshot) {
@@ -3866,10 +4107,15 @@ class StatisticsPage extends StatefulWidget {
 }
 
 class _StatsData {
-  const _StatsData({required this.contacts, required this.clients});
+  const _StatsData({
+    required this.contacts,
+    required this.clients,
+    required this.leadSessions,
+  });
 
   final List<Contact> contacts;
   final List<Client> clients;
+  final List<Map<String, dynamic>> leadSessions;
 }
 
 class _StatsTileData {
@@ -3923,16 +4169,32 @@ class _StatisticsPageState extends State<StatisticsPage> {
           .isFilter('archived_at', null)
           .isFilter('moved_to_client_at', null),
       _supabase.from('clients').select().isFilter('archived_at', null),
+      _fetchLeadSessionsForStats(),
     ]);
 
-    final contacts = (results[0] as List)
+    final contacts = results[0]
         .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
         .toList();
-    final clients = (results[1] as List)
+    final clients = results[1]
         .map((item) => Client.fromMap(Map<String, dynamic>.from(item)))
         .toList();
 
-    return _StatsData(contacts: contacts, clients: clients);
+    return _StatsData(
+      contacts: contacts,
+      clients: clients,
+      leadSessions: results[2]
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(),
+    );
+  }
+
+  Future<List<dynamic>> _fetchLeadSessionsForStats() async {
+    try {
+      final remoteSessions = await _supabase.from('lead_sessions').select();
+      return [...remoteSessions, ..._localLeadSessions];
+    } catch (_) {
+      return List<Map<String, dynamic>>.from(_localLeadSessions);
+    }
   }
 
   void _reload() {
@@ -3942,12 +4204,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
   @override
   Widget build(BuildContext context) {
     return _PageShell(
-      title: 'Statystyka',
-      action: IconButton(
-        tooltip: 'Odśwież',
-        onPressed: _reload,
-        icon: const Icon(Icons.refresh),
-      ),
       child: FutureBuilder<_StatsData>(
         future: _statsFuture,
         builder: (context, snapshot) {
@@ -3964,7 +4220,8 @@ class _StatisticsPageState extends State<StatisticsPage> {
           }
 
           final data =
-              snapshot.data ?? const _StatsData(contacts: [], clients: []);
+              snapshot.data ??
+              const _StatsData(contacts: [], clients: [], leadSessions: []);
           final contacts = data.contacts
               .where((contact) => _isContactInRange(contact, _range))
               .toList();
@@ -3974,61 +4231,70 @@ class _StatisticsPageState extends State<StatisticsPage> {
           final signedClients = clients
               .where((client) => client.status == 'signed_contract')
               .length;
+          final leadSessions = data.leadSessions
+              .where((session) => _isSessionInRange(session, _range))
+              .toList();
+          final totalLeadSeconds = leadSessions.fold<int>(
+            0,
+            (sum, session) =>
+                sum + (session['work_seconds'] as num? ?? 0).toInt(),
+          );
 
           return RefreshIndicator(
             onRefresh: () async => _reload(),
             child: ListView(
               padding: const EdgeInsets.only(bottom: 96),
               children: [
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SegmentedButton<String>(
-                    segments: [
-                      for (final range in _statsRanges)
-                        ButtonSegment(
-                          value: range.value,
-                          label: Text(range.label),
-                        ),
-                    ],
-                    selected: {_range},
-                    onSelectionChanged: (selection) {
-                      setState(() => _range = selection.first);
-                    },
-                  ),
+                _StatsRangeSelector(
+                  currentRange: _range,
+                  onChanged: (range) => setState(() => _range = range),
                 ),
                 const SizedBox(height: 14),
-                _StatsTile(
-                  tile: _StatsTileData(
-                    id: 'contacts',
-                    title: 'Dodane kontakty',
-                    value: contacts.length.toString(),
-                    subtitle: 'Aktualnie aktywne kontakty',
-                    icon: Icons.groups,
-                    color: const Color(0xFF2F5D50),
-                  ),
-                  onTap: () {},
-                ),
-                _StatsTile(
-                  tile: _StatsTileData(
-                    id: 'clients',
-                    title: 'Moi Klienci',
-                    value: clients.length.toString(),
-                    subtitle: 'Aktualnie aktywni klienci',
-                    icon: Icons.handshake,
-                    color: const Color(0xFF2563A9),
-                  ),
-                  onTap: () {},
-                ),
-                _StatsTile(
-                  tile: _StatsTileData(
-                    id: 'signed_clients',
-                    title: 'Spisani klienci',
-                    value: signedClients.toString(),
-                    subtitle: 'Klienci ze statusem Spisana umowa',
-                    icon: Icons.assignment_turned_in,
-                    color: const Color(0xFF8A6F20),
-                  ),
-                  onTap: () {},
+                _StatsGrid(
+                  tiles: [
+                    _StatsTileData(
+                      id: 'contacts',
+                      title: 'Dodane kontakty',
+                      value: contacts.length.toString(),
+                      subtitle: 'Aktywne kontakty',
+                      icon: Icons.groups,
+                      color: const Color(0xFF2F5D50),
+                    ),
+                    _StatsTileData(
+                      id: 'clients',
+                      title: 'Moi Klienci',
+                      value: clients.length.toString(),
+                      subtitle: 'Aktywni klienci',
+                      icon: Icons.handshake,
+                      color: const Color(0xFF2563A9),
+                    ),
+                    _StatsTileData(
+                      id: 'signed_clients',
+                      title: 'Spisani klienci',
+                      value: signedClients.toString(),
+                      subtitle: 'Spisana umowa',
+                      icon: Icons.assignment_turned_in,
+                      color: const Color(0xFF8A6F20),
+                    ),
+                    _StatsTileData(
+                      id: 'lead_time',
+                      title: 'Czas leadowania',
+                      value: _formatDuration(
+                        Duration(seconds: totalLeadSeconds),
+                      ),
+                      subtitle: 'Łącznie',
+                      icon: Icons.timer_outlined,
+                      color: const Color(0xFF6D6A75),
+                    ),
+                    _StatsTileData(
+                      id: 'lead_sessions',
+                      title: 'Sesje leadowania',
+                      value: leadSessions.length.toString(),
+                      subtitle: 'Ile razy agent leadował',
+                      icon: Icons.route_outlined,
+                      color: const Color(0xFFA8473B),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -4046,6 +4312,12 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
   bool _isClientInRange(Client client, String range) {
     final date = client.contractSignedAt;
+    if (range == 'all' || date == null) return range == 'all';
+    return _isDateInRange(date, range);
+  }
+
+  bool _isSessionInRange(Map<String, dynamic> session, String range) {
+    final date = DateTime.tryParse(session['session_date']?.toString() ?? '');
     if (range == 'all' || date == null) return range == 'all';
     return _isDateInRange(date, range);
   }
@@ -4137,6 +4409,67 @@ class _StatsTile extends StatelessWidget {
   }
 }
 
+class _StatsRangeSelector extends StatelessWidget {
+  const _StatsRangeSelector({
+    required this.currentRange,
+    required this.onChanged,
+  });
+
+  final String currentRange;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (final range in _statsRanges)
+          Expanded(
+            child: TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF172019),
+                padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: () => onChanged(range.value),
+              child: Text(
+                range.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: currentRange == range.value
+                      ? FontWeight.w900
+                      : FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _StatsGrid extends StatelessWidget {
+  const _StatsGrid({required this.tiles});
+
+  final List<_StatsTileData> tiles;
+
+  @override
+  Widget build(BuildContext context) {
+    return GridView.count(
+      crossAxisCount: 2,
+      childAspectRatio: 1.18,
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      children: [
+        for (final tile in tiles) _StatsTile(tile: tile, onTap: () {}),
+      ],
+    );
+  }
+}
+
 class AccountPage extends StatelessWidget {
   const AccountPage({super.key});
 
@@ -4146,7 +4479,6 @@ class AccountPage extends StatelessWidget {
     final email = user?.email ?? '';
 
     return _PageShell(
-      title: 'Konto',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -4169,11 +4501,9 @@ class AccountPage extends StatelessWidget {
 }
 
 class _PageShell extends StatelessWidget {
-  const _PageShell({required this.title, required this.child, this.action});
+  const _PageShell({required this.child});
 
-  final String title;
   final Widget child;
-  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -4181,26 +4511,7 @@ class _PageShell extends StatelessWidget {
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-                ?action,
-              ],
-            ),
-            const SizedBox(height: 18),
-            Expanded(child: child),
-          ],
-        ),
+        child: child,
       ),
     );
   }
@@ -4245,17 +4556,22 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-Future<bool?> showAddContactSheet(BuildContext context) {
+Future<bool?> showAddContactSheet(
+  BuildContext context, {
+  String initialStatus = 'scheduled_meeting',
+}) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    builder: (_) => const AddContactSheet(),
+    builder: (_) => AddContactSheet(initialStatus: initialStatus),
   );
 }
 
 class AddContactSheet extends StatefulWidget {
-  const AddContactSheet({super.key});
+  const AddContactSheet({super.key, required this.initialStatus});
+
+  final String initialStatus;
 
   @override
   State<AddContactSheet> createState() => _AddContactSheetState();
@@ -4267,13 +4583,19 @@ class _AddContactSheetState extends State<AddContactSheet> {
   final _phoneController = TextEditingController();
   final _addressController = TextEditingController();
   final _noteController = TextEditingController();
-  String _status = 'scheduled_meeting';
+  late String _status;
   DateTime _contactDate = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _contactTime = const TimeOfDay(hour: 18, minute: 0);
   String _contactProduct = _products.first;
   String? _contactQuality;
   DateTime? _contactNotification;
   bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _status = widget.initialStatus;
+  }
 
   @override
   void dispose() {

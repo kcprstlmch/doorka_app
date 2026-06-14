@@ -37,9 +37,12 @@ Szybki kontakt automatycznie ustawia status Szybki kontakt.
 
 ## Szybka notatka
 Agent wybiera akcję Szybka notatka z Przycisku Szybkiej Akcji.
-Dokładny zakres tej funkcji wymaga doprecyzowania.
-Na ten moment szybka notatka jest planowaną akcją na późniejszy etap.
-Prawdopodobnie będzie to informacja, którą później można przypisać do kontaktu, terenu albo nagrania.
+Szybka notatka jest prostym inputem tekstowym bez dodatkowych pól.
+Po zapisaniu notatka pojawia się na Dashboardzie.
+Szybka notatka służy do zapisania krótkiej informacji na szybko.
+Po prawej stronie notatki znajduje się przycisk X.
+Kliknięcie X usuwa notatkę permanentnie z aplikacji.
+Szybka notatka nie wymaga pełnego procesu kontaktu ani klienta.
 
 ## Zmiana statusu
 Agent otwiera kartę kontaktu albo klienta.
