@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:io' show File;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -25,6 +28,8 @@ Future<void> main() async {
 SupabaseClient get _supabase => Supabase.instance.client;
 
 final List<Map<String, dynamic>> _localLeadSessions = [];
+final ValueNotifier<String?> _avatarPathNotifier = ValueNotifier<String?>(null);
+const _avatarPathPreferenceKey = 'doorka.avatar_path';
 
 class DoorkaApp extends StatelessWidget {
   const DoorkaApp({super.key});
@@ -40,6 +45,12 @@ class DoorkaApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         scaffoldBackgroundColor: const Color(0xFFF7F4ED),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.transparent,
+          scrolledUnderElevation: 0,
+          elevation: 0,
+        ),
         inputDecorationTheme: InputDecorationTheme(
           filled: true,
           fillColor: Colors.white,
@@ -386,6 +397,17 @@ class _HomeScreenState extends State<HomeScreen> {
   int _contactsRefresh = 0;
 
   @override
+  void initState() {
+    super.initState();
+    _loadSavedAvatarPath();
+  }
+
+  Future<void> _loadSavedAvatarPath() async {
+    final preferences = await SharedPreferences.getInstance();
+    _avatarPathNotifier.value = preferences.getString(_avatarPathPreferenceKey);
+  }
+
+  @override
   Widget build(BuildContext context) {
     final pages = [
       const DashboardPage(),
@@ -399,34 +421,31 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         centerTitle: false,
         title: Image.asset('assets/images/app-sidebar-logo.png', height: 34),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(
+            height: 1,
+            thickness: 1,
+            color: Color(0xFFE4E0D7),
+          ),
+        ),
         actions: [
-          IconButton(
-            tooltip: 'Powiadomienia',
-            onPressed: () {},
-            icon: const Badge(
-              smallSize: 8,
-              backgroundColor: Color(0xFFE53935),
-              child: Icon(Icons.notifications_none),
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: IconButton(
+              tooltip: 'Powiadomienia',
+              onPressed: () {},
+              icon: const Badge(
+                smallSize: 8,
+                backgroundColor: Color(0xFFE53935),
+                child: Icon(Icons.notifications_none, size: 25),
+              ),
             ),
           ),
         ],
       ),
       body: pages[_currentIndex],
-      floatingActionButton: FloatingActionButton(
-        tooltip: 'Dodaj kontakt',
-        backgroundColor: const Color(0xFF2F5D50),
-        foregroundColor: Colors.white,
-        shape: const CircleBorder(),
-        onPressed: () async {
-          final saved = await showAddContactSheet(context);
-          if (!mounted || saved != true) return;
-          setState(() {
-            _currentIndex = 1;
-            _contactsRefresh++;
-          });
-        },
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: null,
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
       bottomNavigationBar: _BottomNavBar(
         currentIndex: _currentIndex,
@@ -457,9 +476,9 @@ class _BottomNavBar extends StatelessWidget {
       label: 'Kontakty',
     ),
     _BottomNavItem(
-      icon: Icons.handshake_outlined,
-      selectedIcon: Icons.handshake,
-      label: 'Moi Klienci',
+      icon: Icons.precision_manufacturing_outlined,
+      selectedIcon: Icons.precision_manufacturing,
+      label: 'W realizacji',
     ),
     _BottomNavItem(
       icon: Icons.bar_chart_outlined,
@@ -482,27 +501,37 @@ class _BottomNavBar extends StatelessWidget {
       elevation: 8,
       child: SafeArea(
         top: false,
-        child: Padding(
-          padding: EdgeInsets.fromLTRB(6, 6, 6, bottomInset > 0 ? 2 : 6),
-          child: Row(
-            children: [
-              for (var index = 0; index < _items.length; index++) ...[
-                Expanded(
-                  child: _BottomNavButton(
-                    item: _items[index],
-                    selected: currentIndex == index,
-                    onTap: () => onDestinationSelected(index),
-                  ),
-                ),
-                if (index != _items.length - 1)
-                  Container(
-                    width: 1,
-                    height: 34,
-                    color: const Color(0xFFE4E0D7),
-                  ),
-              ],
-            ],
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Divider(
+              height: 1,
+              thickness: 1,
+              color: Color(0xFFE4E0D7),
+            ),
+            Padding(
+              padding: EdgeInsets.fromLTRB(6, 6, 6, bottomInset > 0 ? 2 : 6),
+              child: Row(
+                children: [
+                  for (var index = 0; index < _items.length; index++) ...[
+                    Expanded(
+                      child: _BottomNavButton(
+                        item: _items[index],
+                        selected: currentIndex == index,
+                        onTap: () => onDestinationSelected(index),
+                      ),
+                    ),
+                    if (index != _items.length - 1)
+                      Container(
+                        width: 1,
+                        height: 34,
+                        color: const Color(0xFFE4E0D7),
+                      ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -544,11 +573,14 @@ class _BottomNavButton extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              selected ? item.selectedIcon : item.icon,
-              size: 22,
-              color: color,
-            ),
+            if (item.label == 'Konto')
+              _BottomAccountInitials(selected: selected)
+            else
+              Icon(
+                selected ? item.selectedIcon : item.icon,
+                size: 22,
+                color: color,
+              ),
             const SizedBox(height: 3),
             Text(
               item.label,
@@ -563,6 +595,76 @@ class _BottomNavButton extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BottomAccountInitials extends StatelessWidget {
+  const _BottomAccountInitials({required this.selected});
+
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = _supabase.auth.currentUser;
+    return ValueListenableBuilder<String?>(
+      valueListenable: _avatarPathNotifier,
+      builder: (context, avatarPath, _) {
+        return Container(
+          width: 24,
+          height: 24,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected
+                ? const Color(0xFFE7EFE8)
+                : const Color(0xFFF2F0EA),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: selected
+                  ? const Color(0xFF2F5D50)
+                  : const Color(0xFFE4E0D7),
+            ),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: avatarPath == null || avatarPath.isEmpty
+              ? Text(
+                  _userInitials(user),
+                  style: TextStyle(
+                    color: selected
+                        ? const Color(0xFF2F5D50)
+                        : const Color(0xFF6A6F68),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w900,
+                  ),
+                )
+              : _AvatarImage(path: avatarPath),
+        );
+      },
+    );
+  }
+}
+
+class _AvatarImage extends StatelessWidget {
+  const _AvatarImage({required this.path});
+
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    if (kIsWeb) {
+      return Image.network(
+        path,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+      );
+    }
+
+    return Image.file(
+      File(path),
+      width: double.infinity,
+      height: double.infinity,
+      fit: BoxFit.cover,
     );
   }
 }
@@ -669,6 +771,30 @@ String _initials(String name) {
   return result.isEmpty ? '?' : result;
 }
 
+String _userDisplayName(User? user) {
+  final metadata = user?.userMetadata ?? <String, dynamic>{};
+  final name =
+      (metadata['full_name'] ?? metadata['name'] ?? metadata['display_name'])
+          ?.toString()
+          .trim();
+  if (name != null && name.isNotEmpty) return name;
+
+  final email = user?.email ?? '';
+  final localPart = email.split('@').first;
+  if (localPart.isEmpty) return 'Agent';
+
+  return localPart.replaceAll(RegExp(r'[._-]+'), ' ');
+}
+
+String _userInitials(User? user) {
+  final displayName = _userDisplayName(user);
+  final initials = _initials(displayName);
+  if (initials != '?') return initials;
+
+  final email = user?.email ?? '';
+  return email.isEmpty ? 'A' : email.characters.first.toUpperCase();
+}
+
 Future<void> _callPhone(BuildContext context, String phone) async {
   final uri = Uri(scheme: 'tel', path: phone.replaceAll(' ', ''));
   final launched = await launchUrl(uri);
@@ -764,6 +890,7 @@ class Client {
     required this.correspondenceAddress,
     required this.installationAddress,
     required this.productName,
+    required this.executionMethod,
     required this.status,
     required this.contractSignedAt,
     required this.sourceContactId,
@@ -776,6 +903,7 @@ class Client {
   final String correspondenceAddress;
   final String installationAddress;
   final String productName;
+  final String executionMethod;
   final String status;
   final DateTime? contractSignedAt;
 
@@ -785,6 +913,7 @@ class Client {
     String? correspondenceAddress,
     String? installationAddress,
     String? productName,
+    String? executionMethod,
     String? status,
   }) {
     return Client(
@@ -796,12 +925,16 @@ class Client {
           correspondenceAddress ?? this.correspondenceAddress,
       installationAddress: installationAddress ?? this.installationAddress,
       productName: productName ?? this.productName,
+      executionMethod: executionMethod ?? this.executionMethod,
       status: status ?? this.status,
       contractSignedAt: contractSignedAt,
     );
   }
 
   factory Client.fromMap(Map<String, dynamic> data) {
+    final rawExecutionMethod =
+        (data['execution_method'] ?? data['payment_method'])?.toString() ?? '';
+
     return Client(
       id: data['id']?.toString() ?? '',
       sourceContactId: data['source_contact_id']?.toString() ?? '',
@@ -810,6 +943,7 @@ class Client {
       correspondenceAddress: data['correspondence_address']?.toString() ?? '',
       installationAddress: data['installation_address']?.toString() ?? '',
       productName: data['product_name']?.toString() ?? '',
+      executionMethod: _normalizeExecutionMethod(rawExecutionMethod),
       status: data['status']?.toString() ?? 'signed_contract',
       contractSignedAt: DateTime.tryParse(
         data['contract_signed_at']?.toString() ?? '',
@@ -838,6 +972,7 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isLeadDayPaused = false;
   bool _areTomorrowMeetingsCollapsed = false;
   bool _showAllRecentContacts = false;
+  bool _isWeeklyTileExpanded = true;
   bool _pulseGoalButton = false;
   int? _dailyGoal;
   int _sessionScheduledMeetings = 0;
@@ -1138,9 +1273,6 @@ class _DashboardPageState extends State<DashboardPage> {
 
           final data =
               snapshot.data ?? const _DashboardData(contacts: [], clients: []);
-          final scheduledMeetings = data.contacts
-              .where((contact) => contact.status == 'scheduled_meeting')
-              .length;
           final tomorrow = DateTime.now().add(const Duration(days: 1));
           final tomorrowMeetings = data.contacts.where((contact) {
             return contact.status == 'scheduled_meeting' &&
@@ -1155,6 +1287,7 @@ class _DashboardPageState extends State<DashboardPage> {
           final visibleRecentContacts = _showAllRecentContacts
               ? <Contact>[]
               : recentContacts.take(3).toList();
+          final weeklyStats = _buildWeeklyDashboardStats(data);
 
           return RefreshIndicator(
             onRefresh: () async => _reload(),
@@ -1195,12 +1328,6 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ],
                 const SizedBox(height: 16),
-                _DashboardNumbers(
-                  contactsCount: data.contacts.length,
-                  clientsCount: data.clients.length,
-                  meetingsCount: scheduledMeetings,
-                ),
-                const SizedBox(height: 16),
                 _DashboardList(
                   title: 'Umówione na jutro',
                   emptyText: 'Brak spotkań na jutro.',
@@ -1224,13 +1351,118 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const _PreviousWeekHeader(),
+                _WeeklyDashboardTile(
+                  stats: weeklyStats,
+                  isExpanded: _isWeeklyTileExpanded,
+                  onToggleExpanded: () => setState(
+                    () => _isWeeklyTileExpanded = !_isWeeklyTileExpanded,
+                  ),
+                ),
               ],
             ),
           );
         },
       ),
     );
+  }
+
+  _WeekDashboardStats _buildWeeklyDashboardStats(_DashboardData data) {
+    final now = DateTime.now();
+    final thisWeekStart = _weekStart(now);
+    final previousWeekStart = thisWeekStart.subtract(const Duration(days: 7));
+    final nextWeekStart = thisWeekStart.add(const Duration(days: 7));
+
+    final thisContacts = data.contacts
+        .where((contact) => _isDashboardContactInPeriod(
+              contact,
+              thisWeekStart,
+              nextWeekStart,
+            ))
+        .length;
+    final previousContacts = data.contacts
+        .where((contact) => _isDashboardContactInPeriod(
+              contact,
+              previousWeekStart,
+              thisWeekStart,
+            ))
+        .length;
+
+    final thisMeetings = data.contacts
+        .where((contact) => _isDashboardMeetingInPeriod(
+              contact,
+              thisWeekStart,
+              nextWeekStart,
+            ))
+        .length;
+    final previousMeetings = data.contacts
+        .where((contact) => _isDashboardMeetingInPeriod(
+              contact,
+              previousWeekStart,
+              thisWeekStart,
+            ))
+        .length;
+
+    final thisClients = data.clients
+        .where((client) => _isDateInPeriod(
+              client.contractSignedAt,
+              thisWeekStart,
+              nextWeekStart,
+            ))
+        .length;
+    final previousClients = data.clients
+        .where((client) => _isDateInPeriod(
+              client.contractSignedAt,
+              previousWeekStart,
+              thisWeekStart,
+            ))
+        .length;
+
+    return _WeekDashboardStats(
+      contacts: _WeekMetric(
+        label: 'Kontakty',
+        value: thisContacts,
+        previousValue: previousContacts,
+      ),
+      meetings: _WeekMetric(
+        label: 'Spotkania',
+        value: thisMeetings,
+        previousValue: previousMeetings,
+      ),
+      clients: _WeekMetric(
+        label: 'Realizacje',
+        value: thisClients,
+        previousValue: previousClients,
+      ),
+    );
+  }
+
+  bool _isDashboardContactInPeriod(
+    Contact contact,
+    DateTime start,
+    DateTime end,
+  ) {
+    final date = contact.contactDate ?? contact.contactNotification;
+    return _isDateInPeriod(date, start, end);
+  }
+
+  bool _isDashboardMeetingInPeriod(
+    Contact contact,
+    DateTime start,
+    DateTime end,
+  ) {
+    return contact.status == 'scheduled_meeting' &&
+        _isDateInPeriod(contact.contactDate, start, end);
+  }
+
+  bool _isDateInPeriod(DateTime? date, DateTime start, DateTime end) {
+    if (date == null) return false;
+    final day = DateTime(date.year, date.month, date.day);
+    return !day.isBefore(start) && day.isBefore(end);
+  }
+
+  DateTime _weekStart(DateTime date) {
+    final day = DateTime(date.year, date.month, date.day);
+    return day.subtract(Duration(days: day.weekday - 1));
   }
 }
 
@@ -1663,47 +1895,51 @@ class _LeadDayAction {
   final bool filled;
 }
 
-class _DashboardNumbers extends StatelessWidget {
-  const _DashboardNumbers({
-    required this.contactsCount,
-    required this.clientsCount,
-    required this.meetingsCount,
+class _WeekDashboardStats {
+  const _WeekDashboardStats({
+    required this.contacts,
+    required this.meetings,
+    required this.clients,
   });
 
-  final int contactsCount;
-  final int clientsCount;
-  final int meetingsCount;
+  final _WeekMetric contacts;
+  final _WeekMetric meetings;
+  final _WeekMetric clients;
 
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _NumberBox(label: 'Kontakty', value: contactsCount),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _NumberBox(label: 'Klienci', value: clientsCount),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _NumberBox(label: 'Spotkania', value: meetingsCount),
-        ),
-      ],
-    );
-  }
+  int get total => contacts.value + meetings.value + clients.value;
+  int get previousTotal =>
+      contacts.previousValue + meetings.previousValue + clients.previousValue;
 }
 
-class _NumberBox extends StatelessWidget {
-  const _NumberBox({required this.label, required this.value});
+class _WeekMetric {
+  const _WeekMetric({
+    required this.label,
+    required this.value,
+    required this.previousValue,
+  });
 
   final String label;
   final int value;
+  final int previousValue;
+
+  int get difference => value - previousValue;
+}
+
+class _WeeklyDashboardTile extends StatelessWidget {
+  const _WeeklyDashboardTile({
+    required this.stats,
+    required this.isExpanded,
+    required this.onToggleExpanded,
+  });
+
+  final _WeekDashboardStats stats;
+  final bool isExpanded;
+  final VoidCallback onToggleExpanded;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         border: Border.all(color: const Color(0xFFD8D4CA)),
@@ -1712,18 +1948,178 @@ class _NumberBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            value.toString(),
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'W tym tygodniu',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF172019),
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 2),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                onPressed: onToggleExpanded,
+                icon: Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  size: 18,
+                ),
+                iconAlignment: IconAlignment.end,
+                label: Text(
+                  isExpanded ? 'Zwiń' : 'Rozwiń',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          Text(label, style: const TextStyle(color: Color(0xFF6A6F68))),
+          if (isExpanded) ...[
+            const SizedBox(height: 10),
+            Text(
+              stats.total.toString(),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 2),
+            _WeekComparisonText(
+              currentValue: stats.total,
+              previousValue: stats.previousTotal,
+              prefix: 'Wynik tygodnia',
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: _WeekMetricBox(metric: stats.contacts)),
+                const SizedBox(width: 8),
+                Expanded(child: _WeekMetricBox(metric: stats.meetings)),
+                const SizedBox(width: 8),
+                Expanded(child: _WeekMetricBox(metric: stats.clients)),
+              ],
+            ),
+          ],
         ],
       ),
     );
   }
+}
+
+class _WeekMetricBox extends StatelessWidget {
+  const _WeekMetricBox({required this.metric});
+
+  final _WeekMetric metric;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAF9F5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4E0D7)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 5,
+            children: [
+              Text(
+                metric.value.toString(),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              _WeekChangeBadge(
+                currentValue: metric.value,
+                previousValue: metric.previousValue,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            metric.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6A6F68),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _WeekComparisonText extends StatelessWidget {
+  const _WeekComparisonText({
+    required this.currentValue,
+    required this.previousValue,
+    required this.prefix,
+  });
+
+  final int currentValue;
+  final int previousValue;
+  final String prefix;
+
+  @override
+  Widget build(BuildContext context) {
+    final difference = currentValue - previousValue;
+    final percent = _changePercent(currentValue, previousValue);
+    final sign = difference > 0 ? '+' : '';
+
+    return Text(
+      '$prefix: $sign$difference / $sign$percent% vs poprzedni tydzień',
+      style: TextStyle(
+        color: difference >= 0 ? const Color(0xFF2F5D50) : const Color(0xFFD64545),
+        fontSize: 11,
+        fontWeight: FontWeight.w800,
+      ),
+    );
+  }
+}
+
+class _WeekChangeBadge extends StatelessWidget {
+  const _WeekChangeBadge({
+    required this.currentValue,
+    required this.previousValue,
+  });
+
+  final int currentValue;
+  final int previousValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final difference = currentValue - previousValue;
+    final percent = _changePercent(currentValue, previousValue);
+    final sign = difference > 0 ? '+' : '';
+    final color = difference >= 0 ? const Color(0xFF2F5D50) : const Color(0xFFD64545);
+
+    return Text(
+      '$sign$difference / $sign$percent%',
+      style: TextStyle(
+        color: color,
+        fontSize: 9.5,
+        fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+}
+
+int _changePercent(int currentValue, int previousValue) {
+  if (previousValue == 0) {
+    return currentValue == 0 ? 0 : 100;
+  }
+  return (((currentValue - previousValue) / previousValue) * 100).round();
 }
 
 class _DashboardList extends StatelessWidget {
@@ -2009,23 +2405,6 @@ class _RecentContactTile extends StatelessWidget {
   }
 }
 
-class _PreviousWeekHeader extends StatelessWidget {
-  const _PreviousWeekHeader();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
-      child: Text(
-        'Poprzedni tydzień jako porównanie',
-        style: Theme.of(
-          context,
-        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-      ),
-    );
-  }
-}
-
 String _dashboardContactSubtitle(BuildContext context, Contact contact) {
   final parts = <String>[];
   if (contact.contactDate != null && contact.contactTime.isNotEmpty) {
@@ -2091,47 +2470,6 @@ class _ClientsPageState extends State<ClientsPage> {
     });
   }
 
-  Future<void> _returnClientToContacts(Client client) async {
-    final previousClients = List<Client>.from(_clientsCache);
-    final nextClients = previousClients
-        .where((cachedClient) => cachedClient.id != client.id)
-        .toList();
-
-    setState(() {
-      _clientsCache = nextClients;
-      _clientsFuture = Future.value(nextClients);
-    });
-
-    try {
-      if (client.sourceContactId.isNotEmpty) {
-        await _supabase
-            .from('contacts')
-            .update({'moved_to_client_at': null})
-            .eq('id', client.sourceContactId);
-      }
-
-      await _supabase
-          .from('clients')
-          .update({'archived_at': DateTime.now().toIso8601String()})
-          .eq('id', client.id);
-
-      widget.onContactRestored();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _clientsCache = previousClients;
-        _clientsFuture = Future.value(previousClients);
-      });
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Nie udało się przywrócić klienta do kontaktów.'),
-          ),
-        );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return _PageShell(
@@ -2145,7 +2483,7 @@ class _ClientsPageState extends State<ClientsPage> {
           if (snapshot.hasError) {
             return _EmptyState(
               icon: Icons.error_outline,
-              text: 'Nie udało się pobrać klientów.',
+              text: 'Nie udało się pobrać realizacji.',
               detail: snapshot.error.toString(),
             );
           }
@@ -2153,25 +2491,45 @@ class _ClientsPageState extends State<ClientsPage> {
           final clients = snapshot.data ?? [];
           if (clients.isEmpty) {
             return const _EmptyState(
-              icon: Icons.handshake_outlined,
-              text: 'Nie masz jeszcze klientów.',
-              detail: 'Przesuń kontakt w prawo, aby dodać go do Moi Klienci.',
+              icon: Icons.precision_manufacturing_outlined,
+              text: 'Nie masz jeszcze realizacji.',
+              detail:
+                  'Przesuń kontakt w prawo, gdy umowa jest gotowa do realizacji.',
             );
           }
 
+          final activeClients = clients.where(_isActiveRealization).toList();
+          final completedClients = clients
+              .where((client) => !_isActiveRealization(client))
+              .toList();
+
           return RefreshIndicator(
             onRefresh: () async => _reload(),
-            child: ListView.builder(
+            child: ListView(
               padding: const EdgeInsets.only(bottom: 96),
-              itemCount: clients.length,
-              itemBuilder: (context, index) {
-                return _ClientTile(
-                  client: clients[index],
-                  onReturnToContacts: () =>
-                      _returnClientToContacts(clients[index]),
-                  onClientChanged: _updateClientInList,
-                );
-              },
+              children: [
+                _RealizationQueueIntro(
+                  activeCount: activeClients.length,
+                  completedCount: completedClients.length,
+                ),
+                const SizedBox(height: 12),
+                if (activeClients.isEmpty)
+                  const _EmptyState(
+                    icon: Icons.task_alt_outlined,
+                    text: 'Brak aktywnych realizacji.',
+                    detail: 'Zakończone sprawy są niżej, poza główną kolejką.',
+                  )
+                else
+                  for (var index = 0; index < activeClients.length; index++)
+                    _ClientTile(
+                      client: activeClients[index],
+                      onClientChanged: _updateClientInList,
+                    ),
+                if (completedClients.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _CompletedRealizationsShelf(clients: completedClients),
+                ],
+              ],
             ),
           );
         },
@@ -2180,15 +2538,121 @@ class _ClientsPageState extends State<ClientsPage> {
   }
 }
 
+bool _isActiveRealization(Client client) {
+  return client.status != 'installed' &&
+      client.status != 'reported_to_grid_operator' &&
+      client.status != 'subsidy_reported' &&
+      client.status != 'lost';
+}
+
+class _RealizationQueueIntro extends StatelessWidget {
+  const _RealizationQueueIntro({
+    required this.activeCount,
+    required this.completedCount,
+  });
+
+  final int activeCount;
+  final int completedCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF172019),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: const BoxDecoration(
+              color: Color(0xFFE7EFE8),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.route_outlined,
+              color: Color(0xFF2F5D50),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Kolejka realizacji',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$activeCount aktywne sprawy'
+                  '${completedCount > 0 ? ' | $completedCount zakończone niżej' : ''}',
+                  style: const TextStyle(
+                    color: Color(0xFFDDEADF),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CompletedRealizationsShelf extends StatelessWidget {
+  const _CompletedRealizationsShelf({required this.clients});
+
+  final List<Client> clients;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAF9F5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4E0D7)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.inventory_2_outlined, color: Color(0xFF6A6F68)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Zakończone realizacje: ${clients.length}',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+          const Text(
+            'Lista później',
+            style: TextStyle(
+              color: Color(0xFF6A6F68),
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ClientTile extends StatefulWidget {
   const _ClientTile({
     required this.client,
-    required this.onReturnToContacts,
     required this.onClientChanged,
   });
 
   final Client client;
-  final Future<void> Function() onReturnToContacts;
   final ValueChanged<Client> onClientChanged;
 
   @override
@@ -2196,175 +2660,291 @@ class _ClientTile extends StatefulWidget {
 }
 
 class _ClientTileState extends State<_ClientTile> {
-  double _dragOffset = 0;
-
-  static const double _actionWidth = 86;
-
   @override
   Widget build(BuildContext context) {
     final client = widget.client;
     final statusStyle = _clientStatusStyle(client.status);
+    final progress = _realizationProgress(client.status);
+    final currentStage = _realizationStageNumber(client.status);
+    final nextStage = _nextRealizationStageNumber(client);
+    final currentStageName = _realizationShortStageName(client.status);
+    final currentStageDate = _realizationStageDate(client);
+    final nextStageName = _nextRealizationShortStageName(client);
+    final realizationType = _executionMethodLabel(client.executionMethod);
     final address = client.installationAddress.isNotEmpty
         ? client.installationAddress
         : client.correspondenceAddress;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
-      child: GestureDetector(
-        onHorizontalDragUpdate: (details) {
-          setState(() {
-            _dragOffset = (_dragOffset + details.delta.dx).clamp(
-              0,
-              _actionWidth,
+      child: Material(
+        color: statusStyle.color.withValues(alpha: 0.06),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: BorderSide(
+            color: statusStyle.color.withValues(alpha: 0.38),
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () async {
+            final updatedClient = await showClientDetailsSheet(
+              context,
+              client,
             );
-          });
-        },
-        onHorizontalDragEnd: (details) {
-          final velocity = details.primaryVelocity ?? 0;
-          setState(() {
-            _dragOffset = _dragOffset > 72 || velocity > 1100
-                ? _actionWidth
-                : 0;
-          });
-        },
-        child: Stack(
-          children: [
-            Positioned.fill(
-              left: 0,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: _SwipeActionButton(
-                  color: const Color(0xFF2F5D50),
-                  icon: Icons.keyboard_return,
-                  label: 'Kontakt',
-                  onPressed: () => _confirmReturnToContacts(context),
-                ),
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              curve: Curves.easeOutCubic,
-              transform: Matrix4.translationValues(_dragOffset, 0, 0),
-              child: Material(
-                color: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  side: const BorderSide(color: Color(0xFFD8D4CA)),
-                ),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: _dragOffset > 0
-                      ? () => setState(() => _dragOffset = 0)
-                      : () async {
-                          final updatedClient = await showClientDetailsSheet(
-                            context,
-                            client,
-                          );
-                          if (updatedClient != null) {
-                            widget.onClientChanged(updatedClient);
-                          }
-                        },
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          backgroundColor: statusStyle.color.withValues(
-                            alpha: 0.14,
-                          ),
-                          foregroundColor: statusStyle.color,
-                          child: Text(_initials(client.clientName)),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                client.clientName.isEmpty
-                                    ? 'Bez nazwy'
-                                    : client.clientName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              ),
-                              Text(
-                                statusStyle.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: statusStyle.color,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                              if (client.productName.isNotEmpty)
-                                Text(
-                                  client.productName,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Color(0xFF6A6F68),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        if (address.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            tooltip: 'Nawiguj',
-                            color: const Color(0xFF2F5D50),
-                            onPressed: () => _openMap(context, address),
-                            iconSize: 25,
-                            icon: const Icon(Icons.home),
-                          ),
-                        ],
-                        if (client.phone.isNotEmpty) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            tooltip: 'Zadzwoń',
-                            color: const Color(0xFF2F5D50),
-                            onPressed: () => _callPhone(context, client.phone),
-                            iconSize: 25,
-                            icon: const Icon(Icons.phone),
-                          ),
-                        ],
-                      ],
-                    ),
+            if (updatedClient != null) {
+              widget.onClientChanged(updatedClient);
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 122,
+                  child: _RealizationStagePreview(
+                    color: statusStyle.color,
+                    currentStage: currentStage,
+                    currentStageName: currentStageName,
+                    currentStageDate: currentStageDate,
+                    nextStage: nextStage,
+                    nextStageName: nextStageName,
                   ),
                 ),
-              ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        [
+                          client.clientName.isEmpty
+                              ? 'Bez nazwy'
+                              : client.clientName,
+                          if (client.phone.isNotEmpty) client.phone,
+                        ].join(' | '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w800),
+                      ),
+                      if (address.isNotEmpty)
+                        Text(
+                          address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF6A6F68),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      const SizedBox(height: 7),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 6,
+                          backgroundColor: Colors.white,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            statusStyle.color,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      if (client.productName.isNotEmpty ||
+                          realizationType.isNotEmpty)
+                        Text(
+                          [
+                            if (client.productName.isNotEmpty)
+                              client.productName,
+                            if (realizationType.isNotEmpty) realizationType,
+                          ].join(' | '),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Color(0xFF6A6F68),
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Future<void> _confirmReturnToContacts(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Przywrócić do kontaktów?'),
-        content: const Text('Czy na pewno? Akcji nie można odwrócić.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
+class _RealizationStagePreview extends StatelessWidget {
+  const _RealizationStagePreview({
+    required this.color,
+    required this.currentStage,
+    required this.currentStageName,
+    required this.currentStageDate,
+    required this.nextStage,
+    required this.nextStageName,
+  });
+
+  final Color color;
+  final String currentStage;
+  final String currentStageName;
+  final String currentStageDate;
+  final String nextStage;
+  final String nextStageName;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _StageStepPill(
+          number: currentStage,
+          label: currentStageName,
+          helper: currentStageDate,
+          color: color,
+          active: true,
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 15, top: 5, bottom: 5),
+          child: Container(
+            width: 3,
+            height: 24,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.28),
+              borderRadius: BorderRadius.circular(99),
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Przywróć'),
-          ),
-        ],
-      ),
+        ),
+        _StageStepPill(
+          number: nextStage,
+          label: nextStageName,
+          helper: '',
+          color: color,
+          active: false,
+        ),
+      ],
     );
-
-    if (confirmed == true) {
-      await widget.onReturnToContacts();
-    }
   }
+}
+
+class _StageStepPill extends StatelessWidget {
+  const _StageStepPill({
+    required this.number,
+    required this.label,
+    required this.helper,
+    required this.color,
+    required this.active,
+  });
+
+  final String number;
+  final String label;
+  final String helper;
+  final Color color;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          width: active ? 32 : 28,
+          height: active ? 32 : 28,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: active ? color : Colors.white,
+            shape: BoxShape.circle,
+            border: active
+                ? null
+                : Border.all(color: color.withValues(alpha: 0.48)),
+          ),
+          child: Text(
+            number,
+            style: TextStyle(
+              color: active ? Colors.white : color,
+              fontSize: active ? 13 : 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: 7),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: active
+                      ? const Color(0xFF172019)
+                      : const Color(0xFF6A6F68),
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w900,
+                  height: 1.05,
+                ),
+              ),
+              if (helper.isNotEmpty)
+                Text(
+                  helper,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF6A6F68),
+                    fontSize: 9.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+String _executionMethodLabel(String method) {
+  return switch (method) {
+    'gotowka' => 'Gotówkowy',
+    'finansowanie' => 'Na raty',
+    _ => '',
+  };
+}
+
+String _executionMethodDetailsLabel(String method) {
+  return switch (method) {
+    'gotowka' => 'Klient gotówkowy',
+    'finansowanie' => 'Klient na raty',
+    _ => '',
+  };
+}
+
+String _normalizeExecutionMethod(String method) {
+  return switch (method) {
+    'gotowka' || 'cash' => 'gotowka',
+    'finansowanie' || 'credit' || 'kredyt' || 'raty' => 'finansowanie',
+    _ => 'finansowanie',
+  };
+}
+
+bool _isCashRealization(Client client) {
+  return client.executionMethod == 'gotowka';
+}
+
+String _realizationStageDate(Client client) {
+  final date = client.contractSignedAt;
+  if (date == null) return '';
+  return _shortDate(date);
+}
+
+String _stageTwoLabelFor(Client client) {
+  return _isCashRealization(client) ? 'Zaliczka' : 'Finansowanie';
 }
 
 class _ClientStatusStyle {
@@ -2381,28 +2961,116 @@ _ClientStatusStyle _clientStatusStyle(String status) {
       Color(0xFF2F5D50),
     ),
     'financing_approved' => const _ClientStatusStyle(
-      'Zatwierdzone finansowanie',
+      'Po finansowaniu',
       Color(0xFF2563A9),
     ),
     'partial_payment_paid' => const _ClientStatusStyle(
-      'Wpłacona część płatności',
+      'Wpłacona zaliczka',
       Color(0xFF8A5A12),
+    ),
+    'welcome_call_done' => const _ClientStatusStyle(
+      'Po telefonie powitalnym',
+      Color(0xFF5B7CFA),
+    ),
+    'scheduling_installation' => const _ClientStatusStyle(
+      'W trakcie umawiania montażu',
+      Color(0xFFF0A202),
     ),
     'in_installation' => const _ClientStatusStyle(
       'W trakcie montażu',
       Color(0xFF7C3AED),
     ),
-    'installed' => const _ClientStatusStyle('Zamontowany', Color(0xFF147D64)),
+    'installed' => const _ClientStatusStyle(
+      'Zamontowany / po montażu',
+      Color(0xFF147D64),
+    ),
     'reported_to_grid_operator' => const _ClientStatusStyle(
-      'Zgłoszony do ZE',
+      'Zgłoszony do ZEI',
       Color(0xFF4B6584),
     ),
     'subsidy_reported' => const _ClientStatusStyle(
-      'Zgłoszona dotacja',
+      'Przyznana dotacja',
       Color(0xFF0F766E),
     ),
     'lost' => const _ClientStatusStyle('Spad', Color(0xFF2E2D2A)),
     _ => _ClientStatusStyle(status, const Color(0xFF2F5D50)),
+  };
+}
+
+double _realizationProgress(String status) {
+  return switch (status) {
+    'signed_contract' => 0.18,
+    'financing_approved' => 0.28,
+    'partial_payment_paid' => 0.28,
+    'welcome_call_done' => 0.40,
+    'scheduling_installation' => 0.55,
+    'in_installation' => 0.70,
+    'installed' => 0.82,
+    'reported_to_grid_operator' => 0.92,
+    'subsidy_reported' => 1.00,
+    'lost' => 1.00,
+    _ => 0.16,
+  };
+}
+
+String _realizationStageNumber(String status) {
+  return switch (status) {
+    'signed_contract' => '1',
+    'financing_approved' || 'partial_payment_paid' => '2',
+    'welcome_call_done' => '3',
+    'scheduling_installation' => '4',
+    'in_installation' => '5',
+    'installed' => '6',
+    'reported_to_grid_operator' => '7',
+    'subsidy_reported' => '8',
+    'lost' => '!',
+    _ => '1',
+  };
+}
+
+String _nextRealizationStageNumber(Client client) {
+  return switch (client.status) {
+    'signed_contract' => '2',
+    'financing_approved' || 'partial_payment_paid' => '3',
+    'welcome_call_done' => '4',
+    'scheduling_installation' => '5',
+    'in_installation' => '6',
+    'installed' => '7',
+    'reported_to_grid_operator' => '8',
+    'subsidy_reported' => '✓',
+    'lost' => '✓',
+    _ => '2',
+  };
+}
+
+String _realizationShortStageName(String status) {
+  return switch (status) {
+    'signed_contract' => 'Spisana umowa',
+    'financing_approved' => 'Finansowanie',
+    'partial_payment_paid' => 'Zaliczka',
+    'welcome_call_done' => 'Phone call',
+    'scheduling_installation' => 'Umawianie',
+    'in_installation' => 'Montaż',
+    'installed' => 'Po montażu',
+    'reported_to_grid_operator' => 'ZEI',
+    'subsidy_reported' => 'Dotacja',
+    'lost' => 'Spad',
+    _ => 'Spisana umowa',
+  };
+}
+
+String _nextRealizationShortStageName(Client client) {
+  return switch (client.status) {
+    'signed_contract' => _stageTwoLabelFor(client),
+    'financing_approved' || 'partial_payment_paid' => 'Phone call',
+    'welcome_call_done' => 'Umawianie',
+    'scheduling_installation' => 'Montaż',
+    'in_installation' => 'Po montażu',
+    'installed' => 'ZEI',
+    'reported_to_grid_operator' => 'Dotacja',
+    'subsidy_reported' => 'Koniec',
+    'lost' => 'Koniec',
+    _ => 'Finansowanie',
   };
 }
 
@@ -2431,6 +3099,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
   late final TextEditingController _installationAddressController;
   late final TextEditingController _productController;
   late String _status;
+  late String _executionMethod;
   bool _isEditing = false;
   bool _isSaving = false;
   late Client _currentClient;
@@ -2451,6 +3120,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
     );
     _productController = TextEditingController(text: client.productName);
     _status = client.status;
+    _executionMethod = _normalizeExecutionMethod(client.executionMethod);
   }
 
   @override
@@ -2477,6 +3147,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
                 .trim(),
             'installation_address': _installationAddressController.text.trim(),
             'product_name': _productController.text.trim(),
+            'execution_method': _executionMethod,
             'status': _status,
           })
           .eq('id', client.id);
@@ -2488,6 +3159,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
         correspondenceAddress: _correspondenceAddressController.text.trim(),
         installationAddress: _installationAddressController.text.trim(),
         productName: _productController.text.trim(),
+        executionMethod: _executionMethod,
         status: _status,
       );
       setState(() {
@@ -2608,7 +3280,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
       children: [
         _ClientInfoCard(
           icon: Icons.person,
-          title: 'Dane klienta',
+          title: 'Dane realizacji',
           rows: [
             _InfoLine('Imię i nazwisko', _nameController.text.trim()),
             _InfoLine('Nr telefonu', _phoneController.text.trim()),
@@ -2636,6 +3308,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
           accentColor: statusStyle.color,
           rows: [
             _InfoLine('Produkt', _productController.text.trim()),
+            _InfoLine('Typ klienta', _executionMethodDetailsLabel(_executionMethod)),
             _InfoLine('Status', statusStyle.label),
             _InfoLine(
               'Data podpisania',
@@ -2688,8 +3361,20 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(
+          initialValue: _executionMethod,
+          decoration: const InputDecoration(labelText: 'Typ klienta'),
+          items: const [
+            DropdownMenuItem(value: 'gotowka', child: Text('Gotówkowy')),
+            DropdownMenuItem(value: 'finansowanie', child: Text('Na raty')),
+          ],
+          onChanged: (value) {
+            if (value != null) setState(() => _executionMethod = value);
+          },
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
           initialValue: _status,
-          decoration: const InputDecoration(labelText: 'Status klienta'),
+          decoration: const InputDecoration(labelText: 'Status realizacji'),
           items: const [
             DropdownMenuItem(
               value: 'signed_contract',
@@ -2697,24 +3382,35 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
             ),
             DropdownMenuItem(
               value: 'financing_approved',
-              child: Text('Zatwierdzone finansowanie'),
+              child: Text('Po finansowaniu'),
             ),
             DropdownMenuItem(
               value: 'partial_payment_paid',
-              child: Text('Wpłacona część płatności'),
+              child: Text('Wpłacona zaliczka'),
+            ),
+            DropdownMenuItem(
+              value: 'welcome_call_done',
+              child: Text('Po telefonie powitalnym'),
+            ),
+            DropdownMenuItem(
+              value: 'scheduling_installation',
+              child: Text('W trakcie umawiania montażu'),
             ),
             DropdownMenuItem(
               value: 'in_installation',
               child: Text('W trakcie montażu'),
             ),
-            DropdownMenuItem(value: 'installed', child: Text('Zamontowany')),
+            DropdownMenuItem(
+              value: 'installed',
+              child: Text('Zamontowany / po montażu'),
+            ),
             DropdownMenuItem(
               value: 'reported_to_grid_operator',
-              child: Text('Zgłoszony do ZE'),
+              child: Text('Zgłoszony do ZEI'),
             ),
             DropdownMenuItem(
               value: 'subsidy_reported',
-              child: Text('Zgłoszona dotacja'),
+              child: Text('Przyznana dotacja'),
             ),
             DropdownMenuItem(value: 'lost', child: Text('Spad')),
           ],
@@ -2882,6 +3578,7 @@ class _ContactsPageState extends State<ContactsPage> {
       'installation_address': contact.address,
       'product_name': contact.contactProduct,
       'contract_signed_at': _dateOnly(DateTime.now()),
+      'execution_method': 'finansowanie',
       'status': 'signed_contract',
     });
 
@@ -3036,6 +3733,13 @@ class _ContactsPageState extends State<ContactsPage> {
               child: ListView(
                 padding: const EdgeInsets.only(bottom: 96),
                 children: [
+                  if (_selectedContactIds.isNotEmpty) ...[
+                    _SelectedContactsBar(
+                      count: _selectedContactIds.length,
+                      onArchive: _archiveSelected,
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   _StatusVisibilityBar(
                     statusOrder: visibleStatusOrder,
                     hiddenStatuses: _hiddenStatuses,
@@ -3132,6 +3836,40 @@ class _StatusVisibilityBar extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SelectedContactsBar extends StatelessWidget {
+  const _SelectedContactsBar({required this.count, required this.onArchive});
+
+  final int count;
+  final VoidCallback onArchive;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAF9F5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4E0D7)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Zaznaczone kontakty: $count',
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: onArchive,
+            icon: const Icon(Icons.archive_outlined, size: 18),
+            label: const Text('Archiwum'),
+          ),
+        ],
       ),
     );
   }
@@ -3627,7 +4365,7 @@ class _ContactTileState extends State<_ContactTile> {
   Future<void> _confirmAddToClients(BuildContext context) async {
     final confirmed = await _confirmContactAction(
       context: context,
-      title: 'Dodać kontakt do Moi Klienci?',
+      title: 'Przenieść kontakt do realizacji?',
       actionLabel: 'Dodaj',
       actionColor: const Color(0xFF2F5D50),
     );
@@ -4262,10 +5000,10 @@ class _StatisticsPageState extends State<StatisticsPage> {
                     ),
                     _StatsTileData(
                       id: 'clients',
-                      title: 'Moi Klienci',
+                      title: 'W realizacji',
                       value: clients.length.toString(),
-                      subtitle: 'Aktywni klienci',
-                      icon: Icons.handshake,
+                      subtitle: 'Aktywne sprawy',
+                      icon: Icons.precision_manufacturing,
                       color: const Color(0xFF2563A9),
                     ),
                     _StatsTileData(
@@ -4470,29 +5208,649 @@ class _StatsGrid extends StatelessWidget {
   }
 }
 
-class AccountPage extends StatelessWidget {
+class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
+
+  @override
+  State<AccountPage> createState() => _AccountPageState();
+}
+
+class _AccountPageState extends State<AccountPage> {
+  final Set<String> _collapsedSettingsSections = {};
+  bool _meetingReminders = false;
+  bool _phoneReminders = true;
+  bool _visitReminders = true;
+  bool _inactiveContactReminder = true;
+  bool _dailySummary = true;
+  bool _weeklySummary = true;
+  bool _monthlySummary = true;
+  bool _showLeadTile = true;
+  bool _saveLeadTime = true;
+  bool _showLeadSummary = true;
+  bool _longTimerWarning = true;
+
+  void _toggleSettingsSection(String title) {
+    setState(() {
+      if (_collapsedSettingsSections.contains(title)) {
+        _collapsedSettingsSections.remove(title);
+      } else {
+        _collapsedSettingsSections.add(title);
+      }
+    });
+  }
+
+  bool _isSettingsSectionExpanded(String title) {
+    return !_collapsedSettingsSections.contains(title);
+  }
+
+  void _showAvatarOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Zdjęcie profilowe',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context);
+                  await _pickAvatarImage();
+                },
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Dodaj zdjęcie'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _pickAvatarImage() async {
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 900,
+      imageQuality: 85,
+    );
+    if (image == null) return;
+
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(_avatarPathPreferenceKey, image.path);
+    _avatarPathNotifier.value = image.path;
+  }
 
   @override
   Widget build(BuildContext context) {
     final user = _supabase.auth.currentUser;
     final email = user?.email ?? '';
+    final name = _userDisplayName(user);
 
     return _PageShell(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListView(
+        padding: const EdgeInsets.only(bottom: 22),
         children: [
-          Text(
-            email,
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+          ValueListenableBuilder<String?>(
+            valueListenable: _avatarPathNotifier,
+            builder: (context, avatarPath, _) {
+              return _AccountHeader(
+                name: name,
+                email: email,
+                initials: _userInitials(user),
+                avatarPath: avatarPath,
+                onAvatarTap: _showAvatarOptions,
+              );
+            },
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+          _SettingsSection(
+            title: 'Profil',
+            isExpanded: _isSettingsSectionExpanded('Profil'),
+            onToggleExpanded: () => _toggleSettingsSection('Profil'),
+            children: [
+              const _SettingsRow(
+                icon: Icons.badge_outlined,
+                label: 'Imię i nazwisko',
+                value: 'Do uzupełnienia',
+              ),
+              const _SettingsRow(
+                icon: Icons.phone_outlined,
+                label: 'Numer telefonu',
+                value: 'Do uzupełnienia',
+              ),
+              _SettingsRow(
+                icon: Icons.alternate_email_outlined,
+                label: 'Adres e-mail',
+                value: email.isEmpty ? 'Brak e-maila' : email,
+              ),
+              const _SettingsRow(
+                icon: Icons.business_outlined,
+                label: 'Firma lub zespół',
+                value: 'Doorka',
+              ),
+              const _SettingsRow(
+                icon: Icons.solar_power_outlined,
+                label: 'Branża sprzedażowa',
+                value: 'OZE / sprzedaż bezpośrednia',
+              ),
+              _SettingsAction(
+                icon: Icons.lock_reset_outlined,
+                label: 'Zmień hasło',
+                onTap: () {},
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Praca i spotkania',
+            isExpanded: _isSettingsSectionExpanded('Praca i spotkania'),
+            onToggleExpanded: () =>
+                _toggleSettingsSection('Praca i spotkania'),
+            children: const [
+              _SettingsRow(
+                icon: Icons.calendar_month_outlined,
+                label: 'Dni pracy',
+                value: 'Pon. - pt.',
+              ),
+              _SettingsRow(
+                icon: Icons.today_outlined,
+                label: 'Początek tygodnia',
+                value: 'Poniedziałek',
+              ),
+              _SettingsRow(
+                icon: Icons.schedule_outlined,
+                label: 'Domyślne godziny spotkań',
+                value: '18:00, 19:00',
+              ),
+              _SettingsRow(
+                icon: Icons.flag_outlined,
+                label: 'Cel leadowania',
+                value: 'Ustalany przed startem',
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Kontakty, statusy i produkty',
+            isExpanded: _isSettingsSectionExpanded(
+              'Kontakty, statusy i produkty',
+            ),
+            onToggleExpanded: () =>
+                _toggleSettingsSection('Kontakty, statusy i produkty'),
+            children: const [
+              _SettingsRow(
+                icon: Icons.label_outline,
+                label: 'Domyślny status kontaktu',
+                value: 'Szybki kontakt',
+              ),
+              _SettingsRow(
+                icon: Icons.palette_outlined,
+                label: 'Kolory statusów',
+                value: 'Włączone',
+              ),
+              _SettingsRow(
+                icon: Icons.reorder_outlined,
+                label: 'Kolejność statusów',
+                value: 'Ręczna',
+              ),
+              _SettingsRow(
+                icon: Icons.inventory_2_outlined,
+                label: 'Produkty',
+                value: 'PV + ME, ME, UPSELL...',
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Powiadomienia i przypomnienia',
+            isExpanded: _isSettingsSectionExpanded(
+              'Powiadomienia i przypomnienia',
+            ),
+            onToggleExpanded: () =>
+                _toggleSettingsSection('Powiadomienia i przypomnienia'),
+            children: [
+              _SettingsSwitch(
+                icon: Icons.event_available_outlined,
+                label: 'Przypomnienia o spotkaniach',
+                value: _meetingReminders,
+                onChanged: (value) => setState(() => _meetingReminders = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.call_outlined,
+                label: 'Telefon do klienta',
+                value: _phoneReminders,
+                onChanged: (value) => setState(() => _phoneReminders = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.place_outlined,
+                label: 'Podjechanie do klienta',
+                value: _visitReminders,
+                onChanged: (value) => setState(() => _visitReminders = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.history_toggle_off_outlined,
+                label: 'Brak aktywności przez 3 dni',
+                value: _inactiveContactReminder,
+                onChanged: (value) =>
+                    setState(() => _inactiveContactReminder = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.wb_sunny_outlined,
+                label: 'Dzienne podsumowanie',
+                value: _dailySummary,
+                onChanged: (value) => setState(() => _dailySummary = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.calendar_view_week_outlined,
+                label: 'Tygodniowe podsumowanie',
+                value: _weeklySummary,
+                onChanged: (value) => setState(() => _weeklySummary = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.insert_chart_outlined,
+                label: 'Miesięczne podsumowanie',
+                value: _monthlySummary,
+                onChanged: (value) => setState(() => _monthlySummary = value),
+              ),
+              const _SettingsRow(
+                icon: Icons.notifications_active_outlined,
+                label: 'Przypomnij później',
+                value: '15 min maks.',
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Dashboard i leadowanie',
+            isExpanded: _isSettingsSectionExpanded('Dashboard i leadowanie'),
+            onToggleExpanded: () =>
+                _toggleSettingsSection('Dashboard i leadowanie'),
+            children: [
+              _SettingsSwitch(
+                icon: Icons.dashboard_customize_outlined,
+                label: 'Pokaż kafelek leadowania',
+                value: _showLeadTile,
+                onChanged: (value) => setState(() => _showLeadTile = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.timer_outlined,
+                label: 'Zapisuj czas leadowania',
+                value: _saveLeadTime,
+                onChanged: (value) => setState(() => _saveLeadTime = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.celebration_outlined,
+                label: 'Podsumowanie po zakończeniu',
+                value: _showLeadSummary,
+                onChanged: (value) => setState(() => _showLeadSummary = value),
+              ),
+              _SettingsSwitch(
+                icon: Icons.warning_amber_outlined,
+                label: 'Ostrzeżenie o długim liczniku',
+                value: _longTimerWarning,
+                onChanged: (value) => setState(() => _longTimerWarning = value),
+              ),
+              const _SettingsRow(
+                icon: Icons.view_agenda_outlined,
+                label: 'Zakres statystyk na start',
+                value: 'Tydzień',
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Wygląd aplikacji',
+            isExpanded: _isSettingsSectionExpanded('Wygląd aplikacji'),
+            onToggleExpanded: () => _toggleSettingsSection('Wygląd aplikacji'),
+            children: const [
+              _SettingsRow(
+                icon: Icons.light_mode_outlined,
+                label: 'Motyw',
+                value: 'Jasny',
+              ),
+              _SettingsRow(
+                icon: Icons.format_paint_outlined,
+                label: 'Kolorystyka',
+                value: 'Doorka',
+              ),
+            ],
+          ),
+          _SettingsSection(
+            title: 'Dane i bezpieczeństwo',
+            isExpanded: _isSettingsSectionExpanded('Dane i bezpieczeństwo'),
+            onToggleExpanded: () =>
+                _toggleSettingsSection('Dane i bezpieczeństwo'),
+            children: [
+              _SettingsAction(
+                icon: Icons.download_outlined,
+                label: 'Eksportuj statystyki',
+                onTap: () {},
+              ),
+              _SettingsAction(
+                icon: Icons.logout_outlined,
+                label: 'Wyloguj ze wszystkich urządzeń',
+                onTap: () {},
+              ),
+              _SettingsAction(
+                icon: Icons.delete_forever_outlined,
+                label: 'Usuń konto',
+                destructive: true,
+                onTap: () {},
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           FilledButton.icon(
             onPressed: () => _supabase.auth.signOut(),
             icon: const Icon(Icons.logout),
             label: const Text('Wyloguj'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AccountHeader extends StatelessWidget {
+  const _AccountHeader({
+    required this.name,
+    required this.email,
+    required this.initials,
+    required this.avatarPath,
+    required this.onAvatarTap,
+  });
+
+  final String name;
+  final String email;
+  final String initials;
+  final String? avatarPath;
+  final VoidCallback onAvatarTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAF9F5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4E0D7)),
+      ),
+      child: Row(
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: onAvatarTap,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 28,
+                  backgroundColor: const Color(0xFFE7EFE8),
+                  foregroundColor: const Color(0xFF2F5D50),
+                  child: avatarPath == null || avatarPath!.isEmpty
+                      ? Text(
+                          initials,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        )
+                      : ClipOval(child: _AvatarImage(path: avatarPath!)),
+                ),
+                Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.18),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.photo_camera_outlined,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  email.isEmpty ? 'Brak adresu e-mail' : email,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF6A6F68),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({
+    required this.title,
+    required this.isExpanded,
+    required this.onToggleExpanded,
+    required this.children,
+  });
+
+  final String title;
+  final bool isExpanded;
+  final VoidCallback onToggleExpanded;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF172019),
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onToggleExpanded,
+                  icon: Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 18,
+                  ),
+                  iconAlignment: IconAlignment.end,
+                  label: Text(
+                    isExpanded ? 'Zwiń' : 'Rozwiń',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (isExpanded)
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFFE4E0D7)),
+              ),
+              child: Column(
+                children: [
+                  for (var index = 0; index < children.length; index++) ...[
+                    children[index],
+                    if (index != children.length - 1)
+                      const Divider(height: 1, color: Color(0xFFEDE9DF)),
+                  ],
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsRow extends StatelessWidget {
+  const _SettingsRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsBaseRow(
+      icon: icon,
+      label: label,
+      trailing: Text(
+        value,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        textAlign: TextAlign.right,
+        style: const TextStyle(
+          color: Color(0xFF6A6F68),
+          fontSize: 12,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsSwitch extends StatelessWidget {
+  const _SettingsSwitch({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsBaseRow(
+      icon: icon,
+      label: label,
+      trailing: Switch(
+        value: value,
+        onChanged: onChanged,
+        activeThumbColor: const Color(0xFF2F5D50),
+      ),
+    );
+  }
+}
+
+class _SettingsAction extends StatelessWidget {
+  const _SettingsAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.destructive = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = destructive
+        ? const Color(0xFFD64545)
+        : const Color(0xFF172019);
+    return InkWell(
+      onTap: onTap,
+      child: _SettingsBaseRow(
+        icon: icon,
+        label: label,
+        color: color,
+        trailing: Icon(Icons.chevron_right, color: color),
+      ),
+    );
+  }
+}
+
+class _SettingsBaseRow extends StatelessWidget {
+  const _SettingsBaseRow({
+    required this.icon,
+    required this.label,
+    required this.trailing,
+    this.color = const Color(0xFF172019),
+  });
+
+  final IconData icon;
+  final String label;
+  final Widget trailing;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w800,
+                height: 1.15,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Align(alignment: Alignment.centerRight, child: trailing),
           ),
         ],
       ),

@@ -157,17 +157,20 @@ Nie usuwaj funkcji związanych z klientami, statusami, spotkaniami, notatkami, p
 Usuń wszystko co związane z Kalkulator w bazie danych w supabase za pomocą SQL
 Po zmianach aplikacja ma nie zawierać żadnej osobnej sekcji kalkulatora ani informacji sugerujących, że Doorka liczy oferty lub zastępuje kalkulatory firmowe.
 
-## Sekcja - Moi Klienci
-Moi Klienci to osobna sekcja aplikacji i osobna tabela w bazie danych.
-Po przeniesieniu kontaktu do Moi Klienci aplikacja tworzy lub aktualizuje rekord klienta w tej osobnej tabeli, a kontakt znika z aktywnej listy Kontakty.
-Część pól kontaktu i klienta jest wspólna. Jeśli agent edytuje wspólne dane w jednej sekcji, na przykład adres albo numer telefonu, aplikacja automatycznie aktualizuje odpowiadające dane w drugiej sekcji.
-Kontakt staje się klientem dopiero po decyzji agenta i kliknięciu przycisku Dodaj do Moi Klienci. Nie dzieje się to automatycznie po samej zmianie statusu, ponieważ klient może się jeszcze rozmyślić.
-Zakładka Moi Klienci powinna być zestawieniem danych szczegółowych dot. danego już klienta, tj. 
+## Sekcja - W realizacji
+W realizacji zastępuje roboczą nazwę Moi Klienci.
+Nie jest to klasyczna lista wszystkich klientów ani ogólny CRM klientów.
+Jest to kolejka spraw po podpisaniu umowy, które są aktualnie procesowane: przed montażem, w trakcie procesu, w trakcie montażu albo na późniejszym etapie realizacji.
+Po przeniesieniu kontaktu do W realizacji aplikacja tworzy lub aktualizuje rekord sprawy realizacyjnej w osobnej tabeli, a kontakt znika z aktywnej listy Kontakty.
+Część pól kontaktu i realizacji jest wspólna. Jeśli agent edytuje wspólne dane w jednej sekcji, na przykład adres albo numer telefonu, aplikacja automatycznie aktualizuje odpowiadające dane w drugiej sekcji.
+Kontakt trafia do W realizacji dopiero po decyzji agenta. Nie dzieje się to automatycznie po samej zmianie statusu, ponieważ klient może się jeszcze rozmyślić.
+Zakładka W realizacji powinna być zestawieniem spraw aktualnie procesowanych, z podstawowymi danymi klienta i informacjami potrzebnymi do realizacji umowy, tj. 
 Imię i nazwisko 
 Numer telefonu
 Adres korespondencyjny
 Adres montażu
 Produkt
+Typ klienta / forma płatności: gotówkowy albo na raty
 Zakładka umowa
 Data podpisania umowy
 Numer umowy (opcjonalny)
@@ -186,15 +189,27 @@ Po montażu
 Zakończone
 Wpisz własne
 Status ma być widoczny i wyróżniony wizualnie. Wpisać można własny status. 
-Statusy realizacji w Moi Klienci są osobną listą od statusów kontaktów.
-Status "Do realizacji" nie jest statusem kontaktu, ale może występować jako status realizacji klienta podpięty bezpośrednio pod tabelę Moi Klienci.
-Minimalne dane wymagane przy dodaniu do Moi Klienci to: dane kontaktu, adres i numer telefonu.
-Domyślny status realizacji po dodaniu do Moi Klienci to Spisana umowa.
-Status "Do realizacji" nie jest na ten moment domyślnym statusem realizacji.
-Domyślne statusy realizacji klientów to: Spisana umowa, Zatwierdzone finansowanie, Wpłacona część płatności, W trakcie montażu, Zamontowany, Zgłoszony do ZE, Zgłoszona dotacje, Spad.
+Statusy realizacji w W realizacji są osobną listą od statusów kontaktów.
+Minimalne dane wymagane przy dodaniu do W realizacji to: dane kontaktu, adres i numer telefonu.
+Domyślny status realizacji po dodaniu do W realizacji to Spisana umowa.
+Domyślne etapy realizacji:
+1. Spisana umowa
+2. Po finansowaniu albo Wpłacona zaliczka
+3. Po telefonie powitalnym
+4. W trakcie umawiania montażu
+5. W trakcie montażu
+6. Zamontowany albo Po montażu
+7. Zgłoszony do ZEI
+8. Przyznana dotacja
+Jeśli klient jest na raty, etap 2 nazywa się Finansowanie.
+Jeśli klient jest gotówkowy, etap 2 nazywa się Wpłacona zaliczka.
+W szczegółach sprawy W realizacji agent może zmienić typ klienta / formę płatności: gotówkowy albo na raty.
 Statusy realizacji klientów są edytowalne przez agenta.
 Zmiana statusu realizacji ma zmieniać kolor nagłówka klienta albo całej sekcji danych klienta, podobnie jak w aplikacji Thor CRM.
-Status Spad oznacza klienta, który po podpisaniu umowy i dodaniu do Moi Klienci rezygnuje. Taki klient nadal liczy się jako dodany klient, ale dodatkowo zasila statystykę spadów. Przy statusie Spad można dodać uwagę / notatkę do klienta.
+W podglądzie kafelka W realizacji nie pokazujemy produktu.
+Agent ma widzieć aktualny etap realizacji oraz mieć wgląd w poprzednie etapy.
+W szczegółach sprawy ma być widoczna historia zmian etapów/statusów wraz z dokładną datą i godziną zmiany.
+Status Spad oznacza klienta, który po podpisaniu umowy i dodaniu do W realizacji rezygnuje. Taki klient nadal liczy się jako dodany klient, ale dodatkowo zasila statystykę spadów. Przy statusie Spad można dodać uwagę / notatkę do klienta.
 Po ustawieniu statusu Spad aplikacja powinna pokazać przycisk Przenieś do archiwum.
 Pozostałe statusy realizacji będą doprecyzowywane razem w dalszej pracy.
 Zakładka realizacja 

@@ -47,27 +47,52 @@ Na ekranie logowania ma być opcja Nie pamiętasz hasła?.
 Reset hasła dotyczy kont zakładanych przez e-mail i hasło. Agent wpisuje swój e-mail, a system wysyła wiadomość z resetem hasła.
 Reset hasła nie dotyczy użytkowników logujących się przez Google.
 
-## Kontakty i Moi Klienci
-Moi Klienci to osobna sekcja aplikacji oraz osobna tabela w bazie danych.
-Docelowa techniczna nazwa tabeli klientów to `clients`.
-Nie jest to tylko filtr albo status na tej samej liście kontaktów.
-Część pól kontaktu i klienta jest wspólna. Edycja wspólnego pola w jednej sekcji, na przykład adresu albo numeru telefonu, ma automatycznie aktualizować odpowiadające dane w drugiej sekcji.
-Uwagi / notatki nie są wspólnym polem kontaktu i klienta. Na ten moment uwagi / notatki występują przy kontaktach, a nie w Moi Klienci.
-Na tym etapie jeden wpis w `clients` oznacza jedną sprawę klienta z jednym produktem / umową.
+## Kontakty i W realizacji
+Sekcja wcześniej roboczo nazywana Moi Klienci zmienia kierunek produktowy na W realizacji.
+Nie jest to lista wszystkich klientów ani klasyczny CRM klientów.
+W realizacji to kolejka spraw po podpisaniu umowy: klienci przed montażem, w trakcie procesu, w trakcie montażu albo w innych aktywnych etapach realizacji.
+Docelowa techniczna nazwa tabeli może nadal pozostać `clients`, ale produktowo traktujemy rekord jako sprawę realizacyjną klienta, a nie sam kontakt klienta.
+Przycisk szybkiej akcji FAB zostaje na razie schowany w aplikacji. Nie usuwamy go koncepcyjnie, ale nie jest widoczny ani klikalny.
+Po zakończeniu procesu, na przykład po montażu i domknięciu zgłoszeń, klient nie powinien dominować głównej listy W realizacji.
+Zakończone sprawy powinny być dostępne w mniej eksponowanym miejscu aplikacji jako archiwum/lista klientów lub zakończone realizacje.
+Część pól kontaktu i realizacji jest wspólna. Edycja wspólnego pola w jednej sekcji, na przykład adresu albo numeru telefonu, ma automatycznie aktualizować odpowiadające dane w drugiej sekcji.
+Uwagi / notatki nie są wspólnym polem kontaktu i realizacji. Na ten moment uwagi / notatki występują przy kontaktach, a nie w W realizacji.
+Na tym etapie jeden wpis w `clients` oznacza jedną sprawę realizacyjną klienta z jednym produktem / umową.
 Jeśli ta sama osoba ma kolejny produkt, na razie dodajemy kolejny wpis w `clients`.
+W kontekście W realizacji pojęcia klient, sprawa realizacyjna, kontakt ze spisaną umową oraz klient w trakcie realizacji mogą być używane zamiennie, jeśli odnoszą się do rekordu po podpisaniu umowy.
+Rekord W realizacji ma mieć typ klienta albo formę płatności: gotówkowy albo na raty.
+Typ klienta/formę płatności można zmienić w szczegółach sprawy W realizacji.
 
 ## Statusy
 Statusy kontaktów i statusy realizacji klienta są osobnymi listami.
-Status "Do realizacji" nie należy do statusów kontaktu. Może występować w obszarze Moi Klienci jako status realizacji podpięty bezpośrednio pod tabelę klientów.
+Status "Do realizacji" nie należy do statusów kontaktu. Może występować w obszarze W realizacji jako status realizacji podpięty bezpośrednio pod tabelę klientów/spraw.
 Nieusuwalne i nieedytowalne statusy kontaktów to: Umówione spotkanie, Zainteresowany, Niezainteresowany, Do podjechania.
 Status Do podjechania ma termin. Dokładny sposób wyboru terminu zostaje do doprecyzowania.
-Domyślnym statusem realizacji klienta po dodaniu do Moi Klienci jest Spisana umowa.
+Domyślnym statusem realizacji klienta po dodaniu do W realizacji jest Spisana umowa.
 Technicznie w tabeli `clients` domyślny status to `signed_contract`.
-Status "Do realizacji" nie jest na ten moment domyślnym statusem realizacji klienta.
+Każdy produkt/sprawa w W realizacji ma etapy realizacji.
+Etap 1 jest bezwzględny: Spisana umowa.
+Po przeniesieniu kontaktu do W realizacji system automatycznie przypisuje etap 1, czyli Spisana umowa.
+Etap 2 może mieć wariant zależny od sposobu realizacji: Po finansowaniu albo Wpłacona zaliczka.
+Jeśli klient jest na raty, etap 2 to Finansowanie.
+Jeśli klient jest gotówkowy, etap 2 to Wpłacona zaliczka.
+Etap 3: Po telefonie powitalnym.
+Etap 4: W trakcie umawiania montażu.
+Etap 5: W trakcie montażu.
+Etap 6: Zamontowany albo Po montażu.
+Etap 7: Zgłoszony do ZEI.
+Etap 8: Przyznana dotacja.
 Statusy realizacji klientów są edytowalne przez agenta.
 Zmiana statusu realizacji klienta ma zmieniać kolor nagłówka albo całej sekcji danych klienta.
-Status "Spad" oznacza klienta, który po podpisaniu umowy i dodaniu do Moi Klienci rezygnuje.
+W podglądzie kafelka W realizacji nie pokazujemy produktu.
+Agent ma widzieć, na jakim etapie realizacji umowy znajduje się sprawa oraz mieć wgląd w wcześniejsze etapy.
+W szczegółach sprawy W realizacji ma być widoczna historia zmian etapów/statusów z dokładną datą i godziną zmiany.
+Status "Spad" oznacza klienta, który po podpisaniu umowy i dodaniu do W realizacji rezygnuje.
 Po ustawieniu statusu Spad aplikacja powinna pokazać przycisk Przenieś do archiwum.
+
+## Supabase
+Nazwy statusów, etapy realizacji i ewentualne zmiany struktury danych w Supabase mogą zostać nadpisane dopiero po wyraźnej zgodzie użytkownika.
+Na etapie projektowania i zmian UI nie wykonujemy automatycznie migracji ani nadpisywania danych w Supabase.
 
 ## Aktywność
 Na etap 1 nie tworzymy osobnych tabel historii statusów.
@@ -75,11 +100,11 @@ Aktualny status trzymamy bezpośrednio w rekordzie kontaktu albo klienta.
 
 ## Statystyki
 Statystyki i raporty agenta mają być wyliczane na bieżąco z danych zapisanych w Supabase, a nie ręcznie utrzymywane jako statyczne wartości.
-Najważniejsze statystyki na start to umówione spotkania, spisane umowy, klienci dodani do Moi Klienci oraz spady.
-Dodanie do Moi Klienci odbywa się przez przesunięcie kafelka kontaktu w prawo.
-Spisana umowa nie jest statusem kontaktu; jest statusem realizacji klienta po dodaniu do Moi Klienci.
+Najważniejsze statystyki na start to umówione spotkania, spisane umowy, sprawy dodane do W realizacji oraz spady.
+Dodanie do W realizacji odbywa się przez przesunięcie kafelka kontaktu w prawo.
+Spisana umowa nie jest statusem kontaktu; jest statusem realizacji po dodaniu do W realizacji.
 Tydzień w statystykach zaczyna się w poniedziałek.
-Spad liczymy jako konwersję: (spisana umowa -> Moi Klienci) / status Spad i pokazujemy procentowo.
+Spad liczymy jako konwersję: (spisana umowa -> W realizacji) / status Spad i pokazujemy procentowo.
 Statystyki mają być wyliczane z danych źródłowych, a nie ręcznie wpisywane.
 Ekran Statystyka ma być oparty o przestawialne kafelki.
 Nad kafelkami znajduje się filtr zakresu danych: łącznie, rok, miesiąc, tydzień i dzień.

@@ -11,6 +11,7 @@ Finalny UX/UI nadal będzie omawiany później na podstawie inspiracji, między 
 
 ## 1. Top bar
 Po lewej logo Doorka, po prawej ikona dzwoneczka wraz z kropeczką czerwoną po jej prawej stronie przedstawiająca powiadomienia, które po kliknięciu wyświetlają listę z najważniejszymi informacjami dot. kontaktów, klientów itp, itd.
+Na dole top baru ma być delikatna pozioma linia oddzielająca menu od treści aktualnego ekranu.
 
 W przyszłości zostanie dodany jeszcze przycisk menu (na prawo od ikony dzwoneczka), po jego kliknięciu wyświetli się lista wszystkich najważniejszych sekcji. Element dodania w przyszłości
 
@@ -21,14 +22,21 @@ Kontakty (z ikoną kilku główek obok siebie),
 Statystyka (z ikoną statystyki),
 Konto (z inicjałami pierwszej litery imienia i pierwszej litery nazwiska)
 
+Zakładka Konto w dolnym panelu nie używa standardowej ikony użytkownika.
+Zamiast ikony pokazuje inicjały agenta w delikatnym okręgu, analogicznie do inicjałów na kafelkach kontaktów.
+
 Element "Start" w dolnym panelu zostaje zastąpiony nazwą "Dashboard".
 Odstępy między ikonami w dolnym panelu mają być mniejsze.
 Między każdą sekcją dolnego panelu ma być widoczna delikatna pionowa kreska.
+Na górze dolnego panelu ma być delikatna pozioma linia oddzielająca nawigację od treści ekranu.
 
 Dodatkowo, po środku Przycisk szybkiej akcji (FAB), z zielonym tłem i białym plusem na środku (op najechaniu plus zamienia się w “X”. Po jego najechaniu wyświetla się nad nim popup z możliwością dodania:
 Umów spotkanie (kontakt ze statusem umówione spotkanie),
 Szybki kontakt (kontakt ze statusem szybki kontakt),
 Dodaj kontakt (standardowa opcja dodania kontaktu)
+
+Na obecnym etapie przycisk szybkiej akcji FAB jest schowany.
+Nie jest widoczny i nie da się go kliknąć.
 
 W przyszłości dodane zostaną również takie funkcje jak: dodaj teren, włącz nagrywanie i wiele więcej. Ten przycisk ma na celu przyspieszenie całego procesu operowania aplikacją. Za jego pomocą agent jest w stanie zrobić wszystko, co wpłynie na jego efektywność w pracy.
 Funkcje terenu/mapy oraz nagrywania są funkcjami przyszłościowymi i nie wchodzą w aktualny podstawowy zakres aplikacji.
@@ -39,13 +47,57 @@ Aplikacja dzieli się na 4 sekcje
 Główne sekcje to:
 Strona główna (dashboard),
 Kontakty, lista kontaktów, panel do zarządzania nimi,
-Moi Klienci, lista klientów z tabeli `clients`,
-Statystyka, automatyczne dane pobierane dot. umówionych spotkań / spisanych umów / klientów dodanych do Moi Klienci / spadów
+W realizacji, kolejka aktywnych spraw z tabeli `clients`,
+Statystyka, automatyczne dane pobierane dot. umówionych spotkań / spisanych umów / spraw dodanych do W realizacji / spadów
 Ustawienia / preferencje konta
 
 Ekrany głównych sekcji nie mają osobnego górnego nagłówka z nazwą sekcji.
-Po wejściu w Dashboard, Kontakty, Statystykę, Moi Klienci albo Konto nie pokazujemy dodatkowego wiersza/kafelka z tytułem ekranu.
+Po wejściu w Dashboard, Kontakty, Statystykę, W realizacji albo Konto nie pokazujemy dodatkowego wiersza/kafelka z tytułem ekranu.
 Treść sekcji zaczyna się od razu od właściwego modułu albo listy.
+
+## W realizacji
+Sekcja W realizacji zastępuje roboczą nazwę Moi Klienci.
+Nie jest to klasyczna lista wszystkich klientów ani CRM klientów.
+Jest to kolejka aktywnych spraw po podpisaniu umowy: przed montażem, w trakcie procesu, w trakcie montażu albo na innym etapie realizacji.
+Po wejściu w sekcję agent ma mentalnie widzieć, że sprawy są procesowane do konkretnego końca.
+Kafelek realizacji powinien pokazywać kolejkę/proces, numer pozycji, aktualny status, kolor statusu i pasek postępu etapu.
+W podglądzie kafelka W realizacji pod paskiem postępu pokazujemy nazwę produktu oraz typ klienta/formę płatności: gotówkowy albo na raty.
+W szczegółach sprawy W realizacji agent może zmienić, czy klient jest gotówkowy, czy na raty.
+Zakończone realizacje, na przykład po montażu i domknięciu zgłoszeń, nie powinny dominować głównej listy. Powinny być dostępne niżej albo w osobnym, mniej eksponowanym miejscu aplikacji.
+Etapy realizacji:
+1. Spisana umowa
+2. Po finansowaniu albo Wpłacona zaliczka
+3. Po telefonie powitalnym
+4. W trakcie umawiania montażu
+5. W trakcie montażu
+6. Zamontowany albo Po montażu
+7. Zgłoszony do ZEI
+8. Przyznana dotacja
+Etap 2 zależy od typu klienta: dla klienta na raty jest to Finansowanie, a dla klienta gotówkowego Wpłacona zaliczka.
+W szczegółach sprawy W realizacji agent ma widzieć historię zmian etapów/statusów z dokładną datą i godziną zmiany.
+
+## Konto i preferencje
+Ekran Konto pełni rolę centrum ustawień użytkownika.
+Na górze ekranu widoczny jest profil agenta z inicjałami w delikatnym tle, nazwą użytkownika i adresem e-mail.
+Kliknięcie inicjałów/awatara agenta otwiera opcję ustawienia zdjęcia profilowego.
+Na inicjałach w ustawieniach ma być widoczna przyciemniona/lekko zblurowana nakładka z ikoną aparatu, podobnie jak w popularnych kontach typu Google.
+Po wybraniu zdjęcia profilowego avatar zastępuje inicjały w ustawieniach oraz w dolnym panelu na zakładce Konto.
+
+Domyślne sekcje ustawień konta:
+- Profil
+- Praca i spotkania
+- Kontakty, statusy i produkty
+- Powiadomienia i przypomnienia
+- Dashboard i leadowanie
+- Wygląd aplikacji
+- Dane i bezpieczeństwo
+
+Każdą sekcję ustawień można zwinąć i rozwinąć.
+Jeśli sekcja jest rozwinięta, obok jej nazwy widoczny jest przycisk "Zwiń" ze strzałką.
+Jeśli sekcja jest zwinięta, obok jej nazwy widoczny jest przycisk "Rozwiń" ze strzałką.
+
+Na obecnym etapie ustawienia są przygotowane jako domyślny ekran preferencji.
+Docelowo wybrane ustawienia będą zapisywane w profilu użytkownika i wykorzystywane w formularzach, Dashboardzie, przypomnieniach oraz statystykach.
 
 ## Kafelki kontaktów
 Na kafelku kontaktu nie pokazujemy pełnego adresu ani numeru telefonu.
@@ -58,10 +110,11 @@ Kliknięcie koła chowa albo pokazuje kontakty danego statusu.
 Kolejność kół można zmieniać, a lista kontaktów układa się według tej samej kolejności.
 Kafelki kontaktów można przestawiać w obrębie ich statusu.
 Listę kontaktów odświeża się gestem pociągnięcia w dół, bez osobnego przycisku odświeżania w nagłówku.
-Przesunięcie kafelka kontaktu w prawo odsłania zielony przycisk dodania do Moi Klienci.
+Przesunięcie kafelka kontaktu w prawo odsłania zielony przycisk przeniesienia do W realizacji.
 Przesunięcie kafelka kontaktu w lewo odsłania dwa przyciski akcji po prawej stronie: pomarańczowe Archiwum oraz czerwone Usuń.
 Każda z tych akcji wymaga potwierdzenia komunikatem „Czy na pewno? Akcji nie można odwrócić.”
-W zakładce Moi Klienci przesunięcie klienta w prawo odsłania akcję przywrócenia do kontaktów, również z potwierdzeniem.
+W zakładce W realizacji nie ma akcji powrotu sprawy do Kontaktów.
+Kafelek realizacji nie pokazuje zielonego przycisku "Kontakt" po przesunięciu w prawo.
 
 ## Dashboard - sekcja główna (tz. Strona główna aplikacji)
 
@@ -129,6 +182,13 @@ Dane z popupu zakończenia sesji powinny automatycznie zapisywać się do statys
 Sekcja "Umówione na jutro" ma mieć taki sam mechanizm zwijania i rozwijania jak "Ostatnio dodane kontakty".
 Po dodaniu umówionego spotkania przez akcję leadowania kontakt powinien pojawić się w kafelku "Umówione na jutro", jeśli termin spotkania wypada jutro.
 
+Dashboard pokazuje kafelek "W tym tygodniu" zamiast samego tekstu "Poprzedni tydzień jako porównanie".
+Kafelek "W tym tygodniu" znajduje się na samym dole wśród kafelków Dashboardu.
+Kafelek "W tym tygodniu" pokazuje aktualny wynik tygodnia oraz porównanie do poprzedniego tygodnia.
+Przy liczbach widoczne są małe wartości porównawcze: różnica liczby oraz procent względem poprzedniego tygodnia.
+Kafelek "W tym tygodniu" ma przycisk "Rozwiń" / "Zwiń".
+Po zwinięciu zostaje widoczny sam nagłówek kafelka z akcją rozwinięcia.
+
 2. Umówione spotkania. Pod aktywnym kafelkiem lista umówionych już obecnie spotkań. 9 wierszy po 2 kafelki. 
 
 Kafelek po lewej stronie to godzina, po dodaniu spotkania do dashboard można ten kafelek edytować poprzez kliknięcie na niego
@@ -160,8 +220,8 @@ Po kliknięciu “X” kontakt zostanie przeniesiony do archiwum, ale agent zost
 
 ### 4. Statystyka
 W tej części dashboard powinny się pojawiać:
-informacje o poprzednim miesiącu (statystyka z Umówionych spotkań łącznie, spisanych umów, klientów dodanych do Moi Klienci i spadów),
-informacje o obecnym miesiącu, (statystyka z umówionych spotkań, spisanych umów, klientów dodanych do Moi Klienci i spadów),
+informacje o poprzednim miesiącu (statystyka z Umówionych spotkań łącznie, spisanych umów, spraw dodanych do W realizacji i spadów),
+informacje o obecnym miesiącu, (statystyka z umówionych spotkań, spisanych umów, spraw dodanych do W realizacji i spadów),
 informacje o poprzednim tygodniu (te same dane co powyżej),
 informacje o obecnym tygodniu (te same dane co powyżej)
 
@@ -181,7 +241,7 @@ Aktywny zakres jest pogrubiony.
 Kafelki statystyk mają układać się po 2 w rzędzie, czyli po 50% szerokości dostępnej kolumny.
 Na obecnym etapie statystyka pokazuje podstawowe kafelki:
 - dodane kontakty
-- Moi Klienci
+- W realizacji
 - spisani klienci
 - łączny czas leadowania
 - liczba sesji leadowania

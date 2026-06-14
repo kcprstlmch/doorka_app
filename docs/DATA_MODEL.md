@@ -46,11 +46,11 @@ Statusy kontaktów:
 - Brak kontaktu
 
 ## `clients`
-Tabela sekcji Moi Klienci.
-Na tym etapie jeden wpis w `clients` oznacza jedną sprawę klienta z jednym produktem / umową.
+Tabela sekcji W realizacji.
+Na tym etapie jeden wpis w `clients` oznacza jedną sprawę realizacyjną klienta z jednym produktem / umową.
 Jeśli ta sama osoba kupuje kolejny produkt, na razie dodajemy ją jako kolejny wpis w `clients`.
 
-W tej tabeli trzymamy też podstawowe informacje o produkcie, umowie, płatności, statusie realizacji oraz maksymalnie dwóch plikach klienta.
+W tej tabeli trzymamy też podstawowe informacje o produkcie, umowie, typie klienta/formie płatności (`execution_method`: gotówkowy albo na raty), statusie realizacji oraz maksymalnie dwóch plikach klienta.
 Nie tworzymy na tym etapie osobnych tabel na produkty, statusy ani dokumenty.
 
 ## RLS
