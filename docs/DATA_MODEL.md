@@ -9,10 +9,11 @@ Każdy agent widzi tylko swoje dane dzięki RLS.
 W tabelach zostają tylko dane potrzebne aplikacji na obecnym etapie.
 Stare tabele z webowego CRM, takie jak `crm_leads`, `crm_recordings`, `crm_manager_agents`, `crm_recruitment_stats`, `calculator_states` i podobne, nie są częścią aktualnego modelu.
 
-Na tym etapie zostają tylko trzy główne tabele:
+Na tym etapie zostają główne tabele:
 - `profiles`
 - `contacts`
 - `clients`
+- `lead_sessions`
 
 ## `profiles`
 Tabela profilu użytkownika połączona z Supabase Auth.
@@ -61,13 +62,28 @@ Profil użytkownika jest widoczny tylko dla właściciela profilu.
 
 ## Statystyki
 Statystyki mają być wyliczane z danych w `contacts` i `clients`.
+Statystyki czasu leadowania i podsumowań sesji mają być wyliczane z `lead_sessions`.
 Nie utrzymujemy osobnych ręcznie wpisywanych tabel statystyk na obecnym etapie.
+
+## `lead_sessions`
+Tabela sesji leadowania.
+Zapisuje podsumowanie po kliknięciu "Koniec" w aktywnym kafelku Dashboardu.
+
+Podstawowe pola:
+- `agent_id`
+- `session_date`
+- `scheduled_meetings_count`
+- `collected_contacts_count`
+- `work_seconds`
+- `break_seconds`
+- `created_at`
 
 ## Czyszczenie bazy
 Docelowo w schemacie `public` zostawiamy tylko:
 - `profiles`
 - `contacts`
 - `clients`
+- `lead_sessions`
 
 Dotychczasowe kontakty i klienci mogą zostać wyczyszczeni.
 W `profiles` zostaje konto `kcprstlmch@gmail.com`.

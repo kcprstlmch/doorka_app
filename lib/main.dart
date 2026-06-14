@@ -426,36 +426,140 @@ class _HomeScreenState extends State<HomeScreen> {
         child: const Icon(Icons.add),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex,
+      bottomNavigationBar: _BottomNavBar(
+        currentIndex: _currentIndex,
         onDestinationSelected: (index) => setState(() => _currentIndex = index),
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Start',
+      ),
+    );
+  }
+}
+
+class _BottomNavBar extends StatelessWidget {
+  const _BottomNavBar({
+    required this.currentIndex,
+    required this.onDestinationSelected,
+  });
+
+  final int currentIndex;
+  final ValueChanged<int> onDestinationSelected;
+
+  static const _items = [
+    _BottomNavItem(
+      icon: Icons.home_outlined,
+      selectedIcon: Icons.home,
+      label: 'Dashboard',
+    ),
+    _BottomNavItem(
+      icon: Icons.groups_outlined,
+      selectedIcon: Icons.groups,
+      label: 'Kontakty',
+    ),
+    _BottomNavItem(
+      icon: Icons.handshake_outlined,
+      selectedIcon: Icons.handshake,
+      label: 'Moi Klienci',
+    ),
+    _BottomNavItem(
+      icon: Icons.bar_chart_outlined,
+      selectedIcon: Icons.bar_chart,
+      label: 'Statystyka',
+    ),
+    _BottomNavItem(
+      icon: Icons.person_outline,
+      selectedIcon: Icons.person,
+      label: 'Konto',
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+
+    return Material(
+      color: Colors.white,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(6, 6, 6, bottomInset > 0 ? 2 : 6),
+          child: Row(
+            children: [
+              for (var index = 0; index < _items.length; index++) ...[
+                Expanded(
+                  child: _BottomNavButton(
+                    item: _items[index],
+                    selected: currentIndex == index,
+                    onTap: () => onDestinationSelected(index),
+                  ),
+                ),
+                if (index != _items.length - 1)
+                  Container(
+                    width: 1,
+                    height: 34,
+                    color: const Color(0xFFE4E0D7),
+                  ),
+              ],
+            ],
           ),
-          NavigationDestination(
-            icon: Icon(Icons.groups_outlined),
-            selectedIcon: Icon(Icons.groups),
-            label: 'Kontakty',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.handshake_outlined),
-            selectedIcon: Icon(Icons.handshake),
-            label: 'Moi Klienci',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.bar_chart_outlined),
-            selectedIcon: Icon(Icons.bar_chart),
-            label: 'Statystyka',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Konto',
-          ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomNavItem {
+  const _BottomNavItem({
+    required this.icon,
+    required this.selectedIcon,
+    required this.label,
+  });
+
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+}
+
+class _BottomNavButton extends StatelessWidget {
+  const _BottomNavButton({
+    required this.item,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final _BottomNavItem item;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = selected ? const Color(0xFF172019) : const Color(0xFF6A6F68);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: onTap,
+      child: SizedBox(
+        height: 58,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              selected ? item.selectedIcon : item.icon,
+              size: 22,
+              color: color,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              item.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontSize: 10.5,
+                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -525,6 +629,18 @@ String _weekdayName(DateTime date) {
     'pt.',
     'sob.',
     'nd.',
+  ][date.weekday - 1];
+}
+
+String _weekdayNameFull(DateTime date) {
+  return const [
+    'Poniedziałek',
+    'Wtorek',
+    'Środa',
+    'Czwartek',
+    'Piątek',
+    'Sobota',
+    'Niedziela',
   ][date.weekday - 1];
 }
 
@@ -716,11 +832,27 @@ class _DashboardData {
 
 class _DashboardPageState extends State<DashboardPage> {
   late Future<_DashboardData> _dashboardFuture;
+  bool _isLeadDayStarted = false;
+  bool _isLeadDayPaused = false;
+  bool _areTomorrowMeetingsCollapsed = false;
+  bool _showAllRecentContacts = false;
+  int? _dailyGoal;
+  Duration _leadDayElapsed = Duration.zero;
+  Duration _leadDayBreakElapsed = Duration.zero;
+  Timer? _leadDayTimer;
+  Timer? _leadDayBreakTimer;
 
   @override
   void initState() {
     super.initState();
     _dashboardFuture = _fetchDashboardData();
+  }
+
+  @override
+  void dispose() {
+    _leadDayTimer?.cancel();
+    _leadDayBreakTimer?.cancel();
+    super.dispose();
   }
 
   Future<_DashboardData> _fetchDashboardData() async {
@@ -747,10 +879,153 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() => _dashboardFuture = _fetchDashboardData());
   }
 
+  void _startLeadDay() {
+    _leadDayTimer?.cancel();
+    _leadDayBreakTimer?.cancel();
+    setState(() {
+      _isLeadDayStarted = true;
+      _isLeadDayPaused = false;
+      _leadDayElapsed = Duration.zero;
+      _leadDayBreakElapsed = Duration.zero;
+    });
+    _leadDayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _isLeadDayPaused) return;
+      setState(() => _leadDayElapsed += const Duration(seconds: 1));
+    });
+  }
+
+  void _pauseLeadDay() {
+    setState(() => _isLeadDayPaused = true);
+    _leadDayBreakTimer?.cancel();
+    _leadDayBreakTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || !_isLeadDayPaused) return;
+      setState(() => _leadDayBreakElapsed += const Duration(seconds: 1));
+    });
+  }
+
+  void _resumeLeadDay() {
+    _leadDayBreakTimer?.cancel();
+    setState(() => _isLeadDayPaused = false);
+  }
+
+  void _finishLeadDay() {
+    final workTime = _leadDayElapsed;
+    final breakTime = _leadDayBreakElapsed;
+    _leadDayTimer?.cancel();
+    _leadDayBreakTimer?.cancel();
+    _leadDayTimer = null;
+    _leadDayBreakTimer = null;
+    setState(() {
+      _isLeadDayStarted = false;
+      _isLeadDayPaused = false;
+      _leadDayElapsed = Duration.zero;
+      _leadDayBreakElapsed = Duration.zero;
+    });
+    _saveLeadSessionStats(workTime: workTime, breakTime: breakTime);
+    _showLeadDaySummary(workTime: workTime, breakTime: breakTime);
+  }
+
+  Future<void> _saveLeadSessionStats({
+    required Duration workTime,
+    required Duration breakTime,
+  }) async {
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    try {
+      await _supabase.from('lead_sessions').insert({
+        'agent_id': userId,
+        'session_date': _dateOnly(DateTime.now()),
+        'scheduled_meetings_count': 0,
+        'collected_contacts_count': 0,
+        'work_seconds': workTime.inSeconds,
+        'break_seconds': breakTime.inSeconds,
+      });
+    } catch (_) {
+      // Tabela statystyk sesji zostanie dodana po dopięciu modelu Supabase.
+    }
+  }
+
+  Future<void> _showLeadDaySummary({
+    required Duration workTime,
+    required Duration breakTime,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Gratulacje, leadowanie zakończone!'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const _CelebrationBurst(),
+              const SizedBox(height: 12),
+              const Text('Podsumowanie tej sesji:'),
+              const SizedBox(height: 14),
+              _SummaryRow(label: 'Umówione spotkania', value: '0'),
+              _SummaryRow(label: 'Zebrane kontakty', value: '0'),
+              _SummaryRow(
+                label: 'Czas pracy',
+                value: _formatDuration(workTime),
+              ),
+              _SummaryRow(
+                label: 'Czas przerwy',
+                value: _formatDuration(breakTime),
+              ),
+            ],
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Zamknij'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _setDailyGoal() async {
+    final controller = TextEditingController();
+    final goal = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Jaki ma być cel na dzisiaj?'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(labelText: 'Liczba spotkań'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Anuluj'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = int.tryParse(controller.text.trim());
+                Navigator.pop(context, value);
+              },
+              child: const Text('Ustal'),
+            ),
+          ],
+        );
+      },
+    );
+    controller.dispose();
+
+    if (goal == null || goal <= 0) return;
+
+    setState(() => _dailyGoal = goal);
+  }
+
   @override
   Widget build(BuildContext context) {
     return _PageShell(
-      title: 'Start',
+      title: 'Dashboard',
       action: IconButton(
         tooltip: 'Odśwież',
         onPressed: _reload,
@@ -773,6 +1048,9 @@ class _DashboardPageState extends State<DashboardPage> {
 
           final data =
               snapshot.data ?? const _DashboardData(contacts: [], clients: []);
+          final scheduledMeetings = data.contacts
+              .where((contact) => contact.status == 'scheduled_meeting')
+              .length;
           final tomorrow = DateTime.now().add(const Duration(days: 1));
           final tomorrowMeetings = data.contacts.where((contact) {
             return contact.status == 'scheduled_meeting' &&
@@ -780,48 +1058,66 @@ class _DashboardPageState extends State<DashboardPage> {
                 _isSameDay(contact.contactDate!, tomorrow);
           }).toList()..sort((a, b) => a.contactTime.compareTo(b.contactTime));
 
-          final nextSteps =
-              data.contacts.where((contact) {
-                return contact.contactNotification != null ||
-                    contact.status == 'to_call' ||
-                    contact.status == 'to_visit' ||
-                    contact.status == 'interested';
-              }).toList()..sort((a, b) {
-                final first =
-                    a.contactNotification ??
-                    a.contactDate ??
-                    DateTime(9999, 12, 31);
-                final second =
-                    b.contactNotification ??
-                    b.contactDate ??
-                    DateTime(9999, 12, 31);
-                return first.compareTo(second);
-              });
+          final recentContacts = data.contacts.take(6).toList();
+          final visibleTomorrowMeetings = _areTomorrowMeetingsCollapsed
+              ? <Contact>[]
+              : tomorrowMeetings;
+          final visibleRecentContacts = _showAllRecentContacts
+              ? <Contact>[]
+              : recentContacts.take(3).toList();
 
           return RefreshIndicator(
             onRefresh: () async => _reload(),
             child: ListView(
               padding: const EdgeInsets.only(bottom: 96),
               children: [
+                _ActiveDashboardTile(
+                  today: DateTime.now(),
+                  dailyGoal: _dailyGoal,
+                  isStarted: _isLeadDayStarted,
+                  isPaused: _isLeadDayPaused,
+                  elapsed: _leadDayElapsed,
+                  onStart: _startLeadDay,
+                  onPause: _pauseLeadDay,
+                  onResume: _resumeLeadDay,
+                  onFinish: _finishLeadDay,
+                  onSetGoal: _setDailyGoal,
+                ),
+                if (_isLeadDayStarted) ...[
+                  const SizedBox(height: 10),
+                  const _LeadDayActions(),
+                ],
+                const SizedBox(height: 16),
                 _DashboardNumbers(
                   contactsCount: data.contacts.length,
                   clientsCount: data.clients.length,
-                  meetingsCount: data.contacts
-                      .where((contact) => contact.status == 'scheduled_meeting')
-                      .length,
+                  meetingsCount: scheduledMeetings,
                 ),
                 const SizedBox(height: 16),
                 _DashboardList(
                   title: 'Umówione na jutro',
                   emptyText: 'Brak spotkań na jutro.',
-                  contacts: tomorrowMeetings,
+                  contacts: visibleTomorrowMeetings,
+                  showExpandAction: true,
+                  isExpanded: !_areTomorrowMeetingsCollapsed,
+                  onToggleExpanded: () => setState(
+                    () => _areTomorrowMeetingsCollapsed =
+                        !_areTomorrowMeetingsCollapsed,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _DashboardList(
-                  title: 'Kolejne kroki',
-                  emptyText: 'Brak zaplanowanych kolejnych kroków.',
-                  contacts: nextSteps.take(6).toList(),
+                  title: 'Ostatnio dodane kontakty',
+                  emptyText: 'Brak ostatnio dodanych kontaktów.',
+                  contacts: visibleRecentContacts,
+                  showExpandAction: true,
+                  isExpanded: !_showAllRecentContacts,
+                  onToggleExpanded: () => setState(
+                    () => _showAllRecentContacts = !_showAllRecentContacts,
+                  ),
                 ),
+                const SizedBox(height: 16),
+                const _PreviousWeekHeader(),
               ],
             ),
           );
@@ -829,6 +1125,330 @@ class _DashboardPageState extends State<DashboardPage> {
       ),
     );
   }
+}
+
+class _ActiveDashboardTile extends StatelessWidget {
+  const _ActiveDashboardTile({
+    required this.today,
+    required this.dailyGoal,
+    required this.isStarted,
+    required this.isPaused,
+    required this.elapsed,
+    required this.onStart,
+    required this.onPause,
+    required this.onResume,
+    required this.onFinish,
+    required this.onSetGoal,
+  });
+
+  final DateTime today;
+  final int? dailyGoal;
+  final bool isStarted;
+  final bool isPaused;
+  final Duration elapsed;
+  final VoidCallback onStart;
+  final VoidCallback onPause;
+  final VoidCallback onResume;
+  final VoidCallback onFinish;
+  final VoidCallback onSetGoal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101512),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF4CAF50),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '${_shortDate(today)} | ${_weekdayNameFull(today)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFFEAF3EC),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                if (isStarted) ...[
+                  RichText(
+                    text: TextSpan(
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                      ),
+                      children: [
+                        const TextSpan(text: 'Czas leadowania'),
+                        const TextSpan(
+                          text: ' | ',
+                          style: TextStyle(color: Color(0xFFC9C2B5)),
+                        ),
+                        TextSpan(text: _formatDuration(elapsed)),
+                      ],
+                    ),
+                  ),
+                ] else
+                  Text(
+                    'Leadowanie',
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                const SizedBox(height: 8),
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 10,
+                  runSpacing: 6,
+                  children: [
+                    if (dailyGoal != null)
+                      Text(
+                        'Cel na dzisiaj: $dailyGoal',
+                        style: const TextStyle(
+                          color: Color(0xFFDDEADF),
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563A9),
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(0, 34),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                      ),
+                      onPressed: onSetGoal,
+                      icon: const Icon(Icons.check, size: 16),
+                      label: const Text(
+                        'Ustal cel',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          _LeadTimerControls(
+            isStarted: isStarted,
+            isPaused: isPaused,
+            onStart: onStart,
+            onPause: onPause,
+            onResume: onResume,
+            onFinish: onFinish,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _formatDuration(Duration duration) {
+  final hours = duration.inHours.toString().padLeft(2, '0');
+  final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+  final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  return '$hours:$minutes:$seconds';
+}
+
+class _LeadTimerControls extends StatelessWidget {
+  const _LeadTimerControls({
+    required this.isStarted,
+    required this.isPaused,
+    required this.onStart,
+    required this.onPause,
+    required this.onResume,
+    required this.onFinish,
+  });
+
+  final bool isStarted;
+  final bool isPaused;
+  final VoidCallback onStart;
+  final VoidCallback onPause;
+  final VoidCallback onResume;
+  final VoidCallback onFinish;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isStarted && isPaused) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _LeadControlButton(
+            label: 'Wznów',
+            icon: Icons.play_arrow_rounded,
+            onPressed: onResume,
+          ),
+          const SizedBox(height: 8),
+          _LeadControlButton(
+            label: 'Koniec',
+            icon: Icons.stop_rounded,
+            onPressed: onFinish,
+          ),
+        ],
+      );
+    }
+
+    return _LeadControlButton(
+      label: isStarted ? 'Przerwa' : 'Start',
+      icon: isStarted ? Icons.pause_rounded : Icons.play_arrow_rounded,
+      onPressed: isStarted ? onPause : onStart,
+      large: true,
+    );
+  }
+}
+
+class _LeadControlButton extends StatelessWidget {
+  const _LeadControlButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.large = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool large;
+
+  @override
+  Widget build(BuildContext context) {
+    final isStart = label == 'Start';
+    final size = large ? (isStart ? 70.0 : 82.0) : 74.0;
+    final backgroundColor = isStart ? const Color(0xFF62BE72) : Colors.white;
+    final foregroundColor = isStart ? Colors.white : const Color(0xFF172019);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(18),
+      onTap: onPressed,
+      child: Container(
+        width: size,
+        height: large ? (isStart ? 70 : 82) : 44,
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(isStart ? 999 : 18),
+          boxShadow: [
+            BoxShadow(
+              color: backgroundColor.withValues(alpha: 0.24),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: foregroundColor, size: large ? 30 : 20),
+            SizedBox(height: large ? 2 : 0),
+            Text(
+              label,
+              style: TextStyle(
+                color: foregroundColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LeadDayActions extends StatelessWidget {
+  const _LeadDayActions();
+
+  @override
+  Widget build(BuildContext context) {
+    const actions = [
+      _LeadDayAction(Icons.event_available_outlined, 'Umów', Color(0xFF2F5D50)),
+      _LeadDayAction(
+        Icons.person_add_alt_1_outlined,
+        'Kontakt',
+        Color(0xFF3B6EA8),
+      ),
+      _LeadDayAction(Icons.edit_note_outlined, 'Notatka', Color(0xFF8A6F20)),
+      _LeadDayAction(Icons.event_busy_outlined, 'Odwołaj', Color(0xFFA8473B)),
+    ];
+
+    return Row(
+      children: [
+        for (var index = 0; index < actions.length; index++) ...[
+          Expanded(child: _LeadDayActionButton(action: actions[index])),
+          if (index != actions.length - 1) const SizedBox(width: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _LeadDayActionButton extends StatelessWidget {
+  const _LeadDayActionButton({required this.action});
+
+  final _LeadDayAction action;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 76,
+      child: OutlinedButton(
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Colors.white,
+          foregroundColor: const Color(0xFF172019),
+          side: BorderSide(color: action.color, width: 1.5),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+        onPressed: () {},
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(action.icon, size: 20, color: action.color),
+            const SizedBox(height: 5),
+            Text(
+              action.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LeadDayAction {
+  const _LeadDayAction(this.icon, this.label, this.color);
+
+  final IconData icon;
+  final String label;
+  final Color color;
 }
 
 class _DashboardNumbers extends StatelessWidget {
@@ -899,11 +1519,17 @@ class _DashboardList extends StatelessWidget {
     required this.title,
     required this.emptyText,
     required this.contacts,
+    this.showExpandAction = false,
+    this.isExpanded = false,
+    this.onToggleExpanded,
   });
 
   final String title;
   final String emptyText;
   final List<Contact> contacts;
+  final bool showExpandAction;
+  final bool isExpanded;
+  final VoidCallback? onToggleExpanded;
 
   @override
   Widget build(BuildContext context) {
@@ -917,29 +1543,228 @@ class _DashboardList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            title,
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
-          ),
-          const SizedBox(height: 10),
-          if (contacts.isEmpty)
-            Text(emptyText, style: const TextStyle(color: Color(0xFF6A6F68)))
-          else
-            for (final contact in contacts)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(
-                  contact.contactName.isEmpty
-                      ? 'Bez nazwy'
-                      : contact.contactName,
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
-                subtitle: Text(_dashboardContactSubtitle(context, contact)),
-                trailing: Text(_statusByValue(contact.status).label),
-                onTap: () => showContactDetailsSheet(context, contact),
               ),
+              if (showExpandAction)
+                TextButton.icon(
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFF2F5D50),
+                    minimumSize: const Size(0, 36),
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  onPressed: onToggleExpanded,
+                  icon: Icon(
+                    isExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    size: 18,
+                  ),
+                  iconAlignment: IconAlignment.end,
+                  label: Text(
+                    isExpanded ? 'Zwiń' : 'Rozwiń',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+            ],
+          ),
+          if (!showExpandAction || isExpanded) ...[
+            const SizedBox(height: 10),
+            if (contacts.isEmpty)
+              Text(emptyText, style: const TextStyle(color: Color(0xFF6A6F68)))
+            else
+              for (var index = 0; index < contacts.length; index++) ...[
+                if (index > 0)
+                  const Divider(
+                    height: 10,
+                    thickness: 1,
+                    color: Color(0xFFE4E0D7),
+                  ),
+                _RecentContactTile(contact: contacts[index]),
+              ],
+          ],
         ],
+      ),
+    );
+  }
+}
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(child: Text(label)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CelebrationBurst extends StatelessWidget {
+  const _CelebrationBurst();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 82,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 900),
+        curve: Curves.easeOutBack,
+        builder: (context, value, _) {
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              Transform.scale(
+                scale: 0.8 + value * 0.25,
+                child: Container(
+                  width: 58,
+                  height: 58,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0C857).withValues(alpha: 0.24),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.celebration,
+                    color: Color(0xFF2F5D50),
+                    size: 34,
+                  ),
+                ),
+              ),
+              for (final item in const [
+                _BurstItem(-54, -22, Color(0xFFF0C857)),
+                _BurstItem(50, -20, Color(0xFF62BE72)),
+                _BurstItem(-42, 30, Color(0xFF2563A9)),
+                _BurstItem(44, 28, Color(0xFFA8473B)),
+              ])
+                Transform.translate(
+                  offset: Offset(item.dx * value, item.dy * value),
+                  child: Opacity(
+                    opacity: (1 - value * 0.15).clamp(0, 1),
+                    child: Icon(
+                      Icons.auto_awesome,
+                      color: item.color,
+                      size: 18,
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _BurstItem {
+  const _BurstItem(this.dx, this.dy, this.color);
+
+  final double dx;
+  final double dy;
+  final Color color;
+}
+
+class _RecentContactTile extends StatelessWidget {
+  const _RecentContactTile({required this.contact});
+
+  final Contact contact;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFFFAF9F5),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => showContactDetailsSheet(context, contact),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFFE7EFE8),
+                foregroundColor: const Color(0xFF2F5D50),
+                child: Text(
+                  _initials(contact.contactName),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      contact.contactName.isEmpty
+                          ? 'Bez nazwy'
+                          : contact.contactName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      _dashboardContactSubtitle(context, contact),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF6A6F68),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _statusByValue(contact.status).label,
+                style: const TextStyle(
+                  color: Color(0xFF2F5D50),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PreviousWeekHeader extends StatelessWidget {
+  const _PreviousWeekHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: Text(
+        'Poprzedni tydzień jako porównanie',
+        style: Theme.of(
+          context,
+        ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
       ),
     );
   }
@@ -3055,7 +3880,6 @@ class _StatsTileData {
     required this.subtitle,
     required this.icon,
     required this.color,
-    this.percent,
   });
 
   final String id;
@@ -3064,7 +3888,6 @@ class _StatsTileData {
   final String subtitle;
   final IconData icon;
   final Color color;
-  final double? percent;
 }
 
 class _StatsRange {
@@ -3085,7 +3908,6 @@ const _statsRanges = [
 class _StatisticsPageState extends State<StatisticsPage> {
   late Future<_StatsData> _statsFuture;
   String _range = 'all';
-  final List<String> _tileOrder = [];
 
   @override
   void initState() {
@@ -3117,43 +3939,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
     setState(() => _statsFuture = _fetchStatsData());
   }
 
-  void _reorderTile(int oldIndex, int newIndex) {
-    if (oldIndex == 0 || newIndex == 0) return;
-
-    setState(() {
-      oldIndex -= 1;
-      newIndex -= 1;
-      if (newIndex > oldIndex) newIndex -= 1;
-      final fullWidthOrder = _tileOrder
-          .where((id) => id != 'leads' && id != 'meetings')
-          .toList();
-      if (oldIndex < 0 || oldIndex >= fullWidthOrder.length) return;
-      if (newIndex < 0 || newIndex > fullWidthOrder.length) return;
-      final id = fullWidthOrder.removeAt(oldIndex);
-      fullWidthOrder.insert(newIndex, id);
-      _tileOrder
-        ..removeWhere((id) => id != 'leads' && id != 'meetings')
-        ..addAll(fullWidthOrder);
-    });
-  }
-
-  void _syncStatsTileOrder(List<_StatsTileData> tiles) {
-    final ids = tiles.map((tile) => tile.id).toSet();
-    _tileOrder
-      ..removeWhere((id) => !ids.contains(id))
-      ..addAll(
-        tiles.map((tile) => tile.id).where((id) => !_tileOrder.contains(id)),
-      );
-  }
-
-  List<_StatsTileData> _orderedStatsTiles(List<_StatsTileData> tiles) {
-    final byId = {for (final tile in tiles) tile.id: tile};
-    return [
-      for (final id in _tileOrder)
-        if (byId[id] != null) byId[id]!,
-    ];
-  }
-
   @override
   Widget build(BuildContext context) {
     return _PageShell(
@@ -3180,16 +3965,20 @@ class _StatisticsPageState extends State<StatisticsPage> {
 
           final data =
               snapshot.data ?? const _StatsData(contacts: [], clients: []);
-          final tiles = _buildStatsTiles(data);
-          _syncStatsTileOrder(tiles);
-          final orderedTiles = _orderedStatsTiles(tiles);
-          final halfWidthTiles = orderedTiles.take(2).toList();
-          final fullWidthTiles = orderedTiles.skip(2).toList();
+          final contacts = data.contacts
+              .where((contact) => _isContactInRange(contact, _range))
+              .toList();
+          final clients = data.clients
+              .where((client) => _isClientInRange(client, _range))
+              .toList();
+          final signedClients = clients
+              .where((client) => client.status == 'signed_contract')
+              .length;
 
           return RefreshIndicator(
             onRefresh: () async => _reload(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            child: ListView(
+              padding: const EdgeInsets.only(bottom: 96),
               children: [
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
@@ -3208,28 +3997,38 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Expanded(
-                  child: ReorderableListView.builder(
-                    padding: const EdgeInsets.only(bottom: 96),
-                    itemCount: fullWidthTiles.length + 1,
-                    onReorderItem: _reorderTile,
-                    itemBuilder: (context, index) {
-                      if (index == 0) {
-                        return _StatsHalfRow(
-                          key: const ValueKey('stats-half-row'),
-                          tiles: halfWidthTiles,
-                          onTap: (tile) => _showStatsDetails(context, tile),
-                        );
-                      }
-
-                      final tile = fullWidthTiles[index - 1];
-                      return _StatsTile(
-                        key: ValueKey(tile.id),
-                        tile: tile,
-                        onTap: () => _showStatsDetails(context, tile),
-                      );
-                    },
+                _StatsTile(
+                  tile: _StatsTileData(
+                    id: 'contacts',
+                    title: 'Dodane kontakty',
+                    value: contacts.length.toString(),
+                    subtitle: 'Aktualnie aktywne kontakty',
+                    icon: Icons.groups,
+                    color: const Color(0xFF2F5D50),
                   ),
+                  onTap: () {},
+                ),
+                _StatsTile(
+                  tile: _StatsTileData(
+                    id: 'clients',
+                    title: 'Moi Klienci',
+                    value: clients.length.toString(),
+                    subtitle: 'Aktualnie aktywni klienci',
+                    icon: Icons.handshake,
+                    color: const Color(0xFF2563A9),
+                  ),
+                  onTap: () {},
+                ),
+                _StatsTile(
+                  tile: _StatsTileData(
+                    id: 'signed_clients',
+                    title: 'Spisani klienci',
+                    value: signedClients.toString(),
+                    subtitle: 'Klienci ze statusem Spisana umowa',
+                    icon: Icons.assignment_turned_in,
+                    color: const Color(0xFF8A6F20),
+                  ),
+                  onTap: () {},
                 ),
               ],
             ),
@@ -3237,85 +4036,6 @@ class _StatisticsPageState extends State<StatisticsPage> {
         },
       ),
     );
-  }
-
-  List<_StatsTileData> _buildStatsTiles(_StatsData data) {
-    final contacts = data.contacts
-        .where((contact) => _isContactInRange(contact, _range))
-        .toList();
-    final clients = data.clients
-        .where((client) => _isClientInRange(client, _range))
-        .toList();
-    final meetings = contacts
-        .where((contact) => contact.status == 'scheduled_meeting')
-        .length;
-    final contracts = clients
-        .where((client) => client.status == 'signed_contract')
-        .length;
-    final lost = clients.where((client) => client.status == 'lost').length;
-    final leadToMeeting = contacts.isEmpty ? 0.0 : meetings / contacts.length;
-    final meetingToContract = meetings == 0 ? 0.0 : contracts / meetings;
-
-    return [
-      _StatsTileData(
-        id: 'leads',
-        title: 'Zebrane leady',
-        value: contacts.length.toString(),
-        subtitle: 'Kontakty w wybranym zakresie',
-        icon: Icons.groups,
-        color: const Color(0xFF2F5D50),
-      ),
-      _StatsTileData(
-        id: 'meetings',
-        title: 'Umówione spotkania',
-        value: meetings.toString(),
-        subtitle: _percentText(leadToMeeting, 'konwersji z leadów'),
-        icon: Icons.event_available,
-        color: const Color(0xFF2563A9),
-        percent: leadToMeeting,
-      ),
-      _StatsTileData(
-        id: 'contracts',
-        title: 'Spisane umowy',
-        value: contracts.toString(),
-        subtitle: _percentText(meetingToContract, 'ze spotkań'),
-        icon: Icons.assignment_turned_in,
-        color: const Color(0xFF8A5A12),
-        percent: meetingToContract,
-      ),
-      _StatsTileData(
-        id: 'clients',
-        title: 'Moi Klienci',
-        value: clients.length.toString(),
-        subtitle: 'Klienci w aktywnej liście',
-        icon: Icons.handshake,
-        color: const Color(0xFF147D64),
-      ),
-      _StatsTileData(
-        id: 'conversion',
-        title: 'Konwersja',
-        value: '${(meetingToContract * 100).round()}%',
-        subtitle: 'Spotkania -> umowy',
-        icon: Icons.trending_up,
-        color: const Color(0xFF7C3AED),
-        percent: meetingToContract,
-      ),
-      _StatsTileData(
-        id: 'lost',
-        title: 'Spady',
-        value: lost.toString(),
-        subtitle: clients.isEmpty
-            ? 'Brak klientów'
-            : '${((lost / clients.length) * 100).round()}% klientów',
-        icon: Icons.trending_down,
-        color: const Color(0xFF2E2D2A),
-        percent: clients.isEmpty ? 0 : lost / clients.length,
-      ),
-    ];
-  }
-
-  String _percentText(double value, String label) {
-    return '${(value * 100).round()}% $label';
   }
 
   bool _isContactInRange(Contact contact, String range) {
@@ -3345,57 +4065,16 @@ class _StatisticsPageState extends State<StatisticsPage> {
     final day = DateTime(date.year, date.month, date.day);
     return day.subtract(Duration(days: day.weekday - 1));
   }
-
-  void _showStatsDetails(BuildContext context, _StatsTileData tile) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(tile.icon, color: tile.color, size: 32),
-              const SizedBox(height: 12),
-              Text(
-                tile.title,
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                tile.value,
-                style: Theme.of(
-                  context,
-                ).textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 8),
-              Text(tile.subtitle),
-              const SizedBox(height: 16),
-              const Text(
-                'Szczegółowe wykresy i lista danych pod tym kafelkiem zostaną dopracowane po ustaleniu finalnych metryk.',
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 }
 
 class _StatsTile extends StatelessWidget {
-  const _StatsTile({super.key, required this.tile, required this.onTap});
+  const _StatsTile({required this.tile, required this.onTap});
 
   final _StatsTileData tile;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    final percent = tile.percent?.clamp(0.0, 1.0);
-
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
@@ -3431,7 +4110,6 @@ class _StatsTile extends StatelessWidget {
                             ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                     ),
-                    const Icon(Icons.drag_handle, color: Color(0xFF8A8F98)),
                   ],
                 ),
                 const SizedBox(height: 18),
@@ -3450,115 +4128,8 @@ class _StatsTile extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (percent != null) ...[
-                  const SizedBox(height: 16),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      minHeight: 10,
-                      value: percent,
-                      backgroundColor: tile.color.withValues(alpha: 0.12),
-                      valueColor: AlwaysStoppedAnimation<Color>(tile.color),
-                    ),
-                  ),
-                ],
               ],
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatsHalfRow extends StatelessWidget {
-  const _StatsHalfRow({super.key, required this.tiles, required this.onTap});
-
-  final List<_StatsTileData> tiles;
-  final ValueChanged<_StatsTileData> onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          for (var index = 0; index < tiles.length; index++) ...[
-            Expanded(
-              child: _StatsMiniTile(
-                tile: tiles[index],
-                onTap: () => onTap(tiles[index]),
-              ),
-            ),
-            if (index != tiles.length - 1) const SizedBox(width: 10),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _StatsMiniTile extends StatelessWidget {
-  const _StatsMiniTile({required this.tile, required this.onTap});
-
-  final _StatsTileData tile;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 150),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFE2DED4)),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 12,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(tile.icon, color: tile.color, size: 22),
-              const Spacer(),
-              Text(
-                tile.value,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  height: 1,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                tile.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                tile.subtitle,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Color(0xFF6A6F68),
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
           ),
         ),
       ),
