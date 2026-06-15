@@ -189,8 +189,6 @@ Na tym etapie ważniejszy jest sposób wyświetlania statystyk niż finalny zest
 Statystyki mają być pokazane jako kafelki, które użytkownik może przestawiać.
 Nad kafelkami ma być filtr zakresu danych: łącznie, rok, miesiąc, tydzień i dzień.
 Kliknięcie kafelka prowadzi do prostych szczegółów danej statystyki.
-Eksport statystyk ma znajdować się w ustawieniach konta.
-
 ### Zadania Codex
 - Przygotować zapytania/statystyki z Supabase.
 - Zbudować model wyliczeń statystyk.
@@ -200,7 +198,6 @@ Eksport statystyk ma znajdować się w ustawieniach konta.
 - Dodać szczegóły po kliknięciu kafelka.
 - Dodać porównania okresów, jeśli zostaną potwierdzone.
 - Dodać statystykę spadów.
-- Przygotować miejsce na eksport statystyk w ustawieniach konta.
 
 ### Zadania użytkownika
 - Doprecyzować, czy statystyki mają pokazywać kilka rodzajów konwersji.
@@ -251,7 +248,7 @@ Zamknij dzień pojawia się wtedy, gdy agent zrealizuje cel danego spotkania/ses
 ### Zadania Codex
 - Zbudować licznik sesji leadowania.
 - Dodać pauzę.
-- Dodać ustawienie celu sesji.
+- Dodać mechanizm celu sesji.
 - Liczyć kontakty i umówione spotkania w trakcie sesji, jeśli zostanie potwierdzone.
 - Dodać podsumowanie sesji.
 - Przygotować logikę Zamknij dzień.

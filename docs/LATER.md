@@ -7,10 +7,6 @@ Nie oznacza to podziału MVP ani planu płatnego. To parking dla tematów, któr
 Decyzja o trzech najważniejszych informacjach widocznych po otwarciu aplikacji zostaje odłożona.
 Aktywny kafelek na Dashboardzie jest szerokim tematem i wrócimy do niego później.
 
-## Godziny spotkań z ustawień agenta
-Docelowo lista godzin w formularzu Umów spotkanie ma być pobierana z ustawień agenta dotyczących standardowych godzin umawiania spotkań.
-Na teraz aplikacja może domyślnie ustawiać godzinę 18:00.
-
 ## Szybka notatka
 Szybka notatka zostaje jako pomysł na późniejszy etap.
 Prawdopodobnie będzie to informacja, którą później można przypisać do kontaktu, terenu albo nagrania.
@@ -35,7 +31,6 @@ Na późniejszym etapie można dodać:
 
 ## Cele leadowania
 Agent prawdopodobnie będzie ustawiał cel po kliknięciu Rozpocznij leadowanie.
-Docelowo cel będzie można zmienić w ustawieniach aplikacji.
 Dokładny proces zostaje do dopracowania.
 
 ## Zamknij dzień
@@ -56,9 +51,6 @@ Inne języki i rynek zagraniczny mogą zostać rozważone później.
 ## UX/UI
 Cały UX/UI zostaje do późniejszego omówienia na podstawie inspiracji, na przykład z Pinteresta.
 Na tym etapie nie podejmujemy jeszcze decyzji o finalnym stylu wizualnym.
-
-## Onboarding
-Po rejestracji prawdopodobnie będzie onboarding, ale temat zostaje omówiony w osobnym czacie.
 
 ## Google Auth
 Przycisk Google może zostać w aplikacji jako przygotowany element, ale konfigurację Google Auth odkładamy na późniejszy etap.

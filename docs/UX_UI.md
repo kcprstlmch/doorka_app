@@ -76,28 +76,23 @@ Etapy realizacji:
 Etap 2 zależy od typu klienta: dla klienta na raty jest to Finansowanie, a dla klienta gotówkowego Wpłacona zaliczka.
 W szczegółach sprawy W realizacji agent ma widzieć historię zmian etapów/statusów z dokładną datą i godziną zmiany.
 
-## Konto i preferencje
+## Konto, ustawienia i onboarding
+Szczegółowa organizacja ekranu Konto, ustawień, preferencji użytkownika oraz podglądu onboardingu znajduje się w `docs/settings.md`.
+
 Ekran Konto pełni rolę centrum ustawień użytkownika.
 Na górze ekranu widoczny jest profil agenta z inicjałami w delikatnym tle, nazwą użytkownika i adresem e-mail.
 Kliknięcie inicjałów/awatara agenta otwiera opcję ustawienia zdjęcia profilowego.
-Na inicjałach w ustawieniach ma być widoczna przyciemniona/lekko zblurowana nakładka z ikoną aparatu, podobnie jak w popularnych kontach typu Google.
+Na inicjałach w ustawieniach ma być widoczna przyciemniona albo lekko zblurowana nakładka z ikoną aparatu, podobnie jak w popularnych kontach typu Google.
 Po wybraniu zdjęcia profilowego avatar zastępuje inicjały w ustawieniach oraz w dolnym panelu na zakładce Konto.
 
-Domyślne sekcje ustawień konta:
-- Profil
-- Praca i spotkania
-- Kontakty, statusy i produkty
-- Powiadomienia i przypomnienia
-- Dashboard i leadowanie
-- Wygląd aplikacji
-- Dane i bezpieczeństwo
+Ekran główny ustawień wizualnie powinien być prostą listą kategorii.
+Każda kategoria jest osobnym kafelkiem albo elementem listy ze strzałką ">".
+Nie pokazujemy wszystkich przełączników i opcji na ekranie głównym ustawień.
 
-Każdą sekcję ustawień można zwinąć i rozwinąć.
-Jeśli sekcja jest rozwinięta, obok jej nazwy widoczny jest przycisk "Zwiń" ze strzałką.
-Jeśli sekcja jest zwinięta, obok jej nazwy widoczny jest przycisk "Rozwiń" ze strzałką.
-
-Na obecnym etapie ustawienia są przygotowane jako domyślny ekran preferencji.
-Docelowo wybrane ustawienia będą zapisywane w profilu użytkownika i wykorzystywane w formularzach, Dashboardzie, przypomnieniach oraz statystykach.
+Po kliknięciu kategorii ekran szczegółów powinien wsuwać się płynnie z prawej strony.
+Przejścia w ustawieniach mają sprawiać wrażenie jednej spójnej, warstwowej przestrzeni.
+Podgląd onboardingu powinien działać jako popup albo warstwa nad aktualnym ekranem.
+Przejścia między krokami onboardingu mają być płynne, z lekkim przesunięciem i przenikaniem treści.
 
 ## Kafelki kontaktów
 Na kafelku kontaktu nie pokazujemy pełnego adresu ani numeru telefonu.
@@ -145,7 +140,7 @@ Po kliknięciu Start aktywny kafelek pokazuje dodatkowo:
 - obecnie umówione spotkania w tej sesji
 - kontakty dodane w tej sesji
 Kontakty w sesji leadowania liczą kontakty dodane ze statusami: Szybki kontakt, Zainteresowany, Do podjechania, Do zadzwonienia.
-Docelowo system powinien wiedzieć z onboardingu albo ustawień, czy dany dzień jest dniem leadowania, sprzedaży, organizacji, odpoczynku albo regeneracji.
+Docelowo system powinien wiedzieć, czy dany dzień jest dniem leadowania, sprzedaży, organizacji, odpoczynku albo regeneracji.
 W dzień organizacji albo odpoczynku aktywny kafelek leadowania nie powinien się pojawiać.
 Po kliknięciu przycisku rozpoczęcia leadowania przycisk "Umów" pojawia się w aktywnym kafelku po prawej stronie, w miejscu przycisku Start.
 Pod aktywnym kafelkiem pojawiają się szybkie akcje:

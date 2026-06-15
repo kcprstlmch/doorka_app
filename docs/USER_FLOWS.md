@@ -25,7 +25,6 @@ Data, godzina i produkt są obowiązkowe.
 Jakość nie jest obowiązkowa.
 Aplikacja domyślnie wybiera kolejny dzień jako datę spotkania.
 Aplikacja domyślnie może ustawić godzinę 18:00.
-Docelowo lista godzin spotkań ma być pobierana z ustawień agenta dotyczących standardowych godzin umawiania spotkań.
 Po zapisaniu kontakt trafia do listy Kontakty i może pojawiać się w Dashboardzie jako umówione spotkanie.
 
 ## Szybki kontakt

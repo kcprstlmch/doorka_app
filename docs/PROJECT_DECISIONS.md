@@ -109,7 +109,6 @@ Statystyki mają być wyliczane z danych źródłowych, a nie ręcznie wpisywane
 Ekran Statystyka ma być oparty o przestawialne kafelki.
 Nad kafelkami znajduje się filtr zakresu danych: łącznie, rok, miesiąc, tydzień i dzień.
 Kliknięcie kafelka otwiera szczegóły danej statystyki.
-Eksport statystyk będzie dostępny w ustawieniach konta.
 Na obecnym etapie ważniejszy jest sposób prezentacji statystyk niż finalna lista metryk.
 
 ## Sesja leadowania

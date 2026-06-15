@@ -54,7 +54,7 @@ Dopiero po zatwierdzeniu nowy status zostaje zapisany.
 Zmiana automatycznie pojawia się w sekcji „Aktywność”, która jest historią zmian statusów danego leada lub klienta.
 Zmiana statusu nie może zapisywać się automatycznie po samym kliknięciu, aby ograniczyć przypadkowe błędy. Po zatwierdzeniu można dodatkowo przez kilka sekund pokazać opcję „Cofnij”.
 ## Formularz dodawania kontaktu
-Zaimplementuj formularz dodawania leada lub klienta zgodnie z poniższą logiką i układem. WSZYSTKIE statusy mogą być edytowane w dowolny dla agenta sposób, nie ma stałego przypisanego statusu do klienta. Agent również może przywrócić domyślne statusy poprzez wejście w ustawienia -> preferencje agenta -> statusy kontaktów -> przywróć domyślne.
+Zaimplementuj formularz dodawania leada lub klienta zgodnie z poniższą logiką i układem. WSZYSTKIE statusy mogą być edytowane w dowolny dla agenta sposób, nie ma stałego przypisanego statusu do klienta.
 Tak naprawdę wszystko można edytować w tej aplikacji jeśli chodzi o informację. Jeden agent może chcieć mieć napisane imię i nazwisko, a inny dane klienta. Wybór danych dot. klientów ma być dowolny.
 
 W bazie danych Supabase ma być jedynie informacja domyślna dotycząca klienta, w sensie takim, że domyślnie kolumna powinna się nazywać na przykład phone_numer, ale dla agenta w aplikacji może się nazywać Rozmiar buta.
@@ -94,7 +94,6 @@ Data, godzina i produkt są obowiązkowe.
 Jakość nie jest obowiązkowa.
 Aplikacja domyślnie wybiera kolejny dzień jako datę spotkania.
 Aplikacja domyślnie może ustawić godzinę 18:00.
-Docelowo lista godzin spotkań ma być pobierana z ustawień agenta dotyczących standardowych godzin umawiania spotkań.
 #### 1. Lista rozwijana “Data”
 Lista Dzień tygodnia zawiera daty kalendarzowe zaczynające od dnia kolejnego:
 #### 2. Lista rozwijana “Godzina”
@@ -251,149 +250,7 @@ Na ten moment nie rozgraniczaj funkcji na bezpłatne i płatne.
 Projektuj aplikację jako jedną całość funkcjonalną, bez blokowania elementów za planem subskrypcyjnym.
 
 ## Ustawienia oraz preferencje użytkownika
-Podziel ustawienia na następujące sekcje:
-### 1. Profil 
-Dodaj możliwość:
-zmiany imienia i nazwiska,
-zmiany numeru telefonu,
-zmiany adresu e-mail,
-dodania zdjęcia profilowego,
-wpisania nazwy firmy lub zespołu,
-wyboru branży sprzedażowej,
-zmiany hasła,
-wylogowania ze wszystkich urządzeń,
-eksportu danych (statystyk),
-usunięcia konta.
-Usunięcie konta oraz wylogowanie ze wszystkich urządzeń wymagają dodatkowego potwierdzenia.
-Usunięcie konta wymaga potwierdzenia przez e-mail.
-Z perspektywy aplikacji konto znika od razu po usunięciu.
-Technicznie w bazie danych konto może mieć 30 dni karencji, ale agent nie powinien widzieć tej informacji w aplikacji.
-### 2. Praca i spotkania
-Dodaj ustawienia:
-domyślnych godzin rozpoczęcia spotkań,
-dni pracy użytkownika,
-początku tygodnia,
-Domyślne godziny rozpoczęcia spotkań użytkownik powinien móc dodawać, usuwać i zmieniać ich kolejność.
-### 3. Kontakty, statusy i produkty
-Dodaj możliwość wyboru domyślnego statusu nowego kontaktu.
-dodawać własne statusy,
-zmieniać nazwy statusów,
-zmieniać ich kolejność,
-ukrywać nieużywane statusy,
-przypisywać statusom kolory.
-Nie pozwalaj usuwać statusu, jeśli jest przypisany do jakiegokolwiek kontaktu. Przed usunięciem użytkownik musi przenieść kontakty do innego statusu. Niech aplikacja się wtedy zapyta agenta czy na pewno chce to zrobić i jeśli chce to niech mu w tym pomoże pytając się go do jakiego statusu chce przenieść agentów. Nie można tego zrobić pojedynczo, tylko wszystkie statusy kopiujemy do innego statusu.
-Dodaj ustawienia produktów. Użytkownik może:
-włączać i wyłączać produkty widoczne w formularzu,
-zmieniać kolejność produktów,
-dodawać własne produkty,
-Domyślna lista produktów:
-PV + ME
-ME
-UPSELL
-Dach
-Pompa ciepła
-Turbina Wiatrowa
-Czyste Powietrze
-Produkt nie jest zapisywany w oddzielnym polu bazy danych. Jest wykorzystywany do automatycznego tworzenia nagłówka w polu „Uwagi / notatki”.
-### 4. Powiadomienia i przypomnienia
-Dodaj osobne przełączniki dla:
-przypomnienia o spotkaniach,
-przypomnienia o telefonie do klienta,
-przypomnienia o podjechaniu do klienta,
-przypomnienie o kontakcie, u którego nie był zmieniany status od 3 dni (możliwość zmiany liczby dni)
-kontaktów bez aktywności,
-dziennego podsumowania pracy,
-miesięcznego podsumowania wyników z informacją o progresie, bądź regresie w stosunku do poprzedniego miesiąca
-tygodniowego podsumowania wyników,
-Pozwól ustawić czas przypomnienia:
-15 minut wcześniej,
-30 minut wcześniej,
-godzinę wcześniej,
-dzień wcześniej,
-własny czas.
-Kanały powiadomień:
-powiadomienie w aplikacji,
-push,
-Spotkanie nie tworzy domyślnie przypomnienia.
-Przypomnienia dotyczą kontaktów z terminem przyjechania albo statusem Zainteresowany z terminem.
-Przypomnienie pojawia się o konkretnym terminie i godzinie.
-Nie ma wcześniejszego przypomnienia. Agent może wybrać Przypomnij później za 15 minut, maksymalnie.
-### 5. Dashboard
-Dodaj możliwość zarządzania elementami widocznymi na Dashboardzie.
-Dostępne elementy:
-Rozpocznij leadowanie,
-statystyka dnia,
-porównanie aktualnego i poprzedniego tygodnia,
-dzisiejsze spotkania,
-ostatnio dodane kontakty,
-kontakty wymagające działania dzisiaj,
-liczba umówionych spotkań,
-liczba odbytych spotkań,
-konwersja.
-Użytkownik może:
-włączać i wyłączać elementy,
-zmieniać ich kolejność,
-ustawiać domyślny zakres statystyk: dzień, tydzień lub miesiąc.
-Przy pierwszym uruchomieniu Dashboard powinien mieć gotowy, sensowny układ bez konieczności konfiguracji. Tz. domyślny
-### 6. Funkcja „Rozpocznij leadowanie”
-Dodaj ustawienia:
-pokazywania funkcji na Dashboardzie,
-zapisywania czasu leadowania w statystykach,
-wyświetlania formularza podsumowania po zakończeniu,
-ostrzeżenia, gdy licznik działa wyjątkowo długo,
-pokazywania lub minimalizowania aktywnego licznika.
-Po zatrzymaniu sesji użytkownik może zobaczyć:
-czas leadowania,
-liczbę dodanych kontaktów,
-liczbę umówionych spotkań,
-skuteczność sesji.
-### 7. Wygląd aplikacji
-Dodaj:
-tryb jasny i tryb ciemny,
-### 8. Raporty i podsumowania
-Raport zawiera:
-liczbę dodanych kontaktów,
-liczbę umówionych spotkań,
-liczbę podpisanych umów,
-liczbę klientów dodanych do Moi Klienci,
-liczbę spadów,
-konwersję,
-czas leadowania,
-porównanie z poprzednim okresem.
-Automatyczne raporty e-mailowe zostają w zakresie funkcjonalnym aplikacji, ale bez oznaczania ich jako funkcji premium.
-Najważniejsze statystyki na start to: umówione spotkania, spisane umowy, klienci dodani do Moi Klienci oraz spady.
-Spisana umowa liczy się w statystykach dopiero po dodaniu do Moi Klienci.
-Tydzień w statystykach zaczyna się w poniedziałek.
-Spad liczymy jako konwersję: (spisana umowa -> Moi Klienci) / status Spad i pokazujemy procentowo.
-Czas leadowania, średni czas spotkania sprzedażowego oraz średni czas spotkania, gdzie klient jest zainteresowany, są pomysłami na późniejszy etap rozwoju aplikacji.
-### 10. Bezpieczeństwo i prywatność
-Dodaj:
-logowanie dwuetapowe,
-blokadę biometryczną,
-automatyczną blokadę aplikacji,
-wybór czasu blokady po bezczynności,
-listę aktywnych urządzeń,
-historię logowań,
-wylogowanie ze wszystkich urządzeń,
-pobranie kopii danych,
-zarządzanie zgodami marketingowymi,
-dostęp do polityki prywatności i regulaminu,
-usunięcie konta.
-Na ekranie logowania ma być opcja Nie pamiętasz hasła?.
-Reset hasła dotyczy kont zakładanych przez e-mail i hasło. Agent wpisuje swój e-mail, a system wysyła wiadomość z resetem hasła.
-Reset hasła nie dotyczy użytkowników logujących się przez Google.
-### 11. Dane i synchronizacja
-Pokaż użytkownikowi:
-status synchronizacji,
-datę ostatniej synchronizacji,
-informację, czy dane są bezpiecznie zapisane w chmurze.
-Dodaj:
-eksport kontaktów do CSV,
-eksport raportów,
-import kontaktów/moi klienci/statystyki z pliku,
-automatyczną synchronizację.
-Nie dodawaj użytkownikowi możliwości samodzielnego przywracania całej bazy danych z kopii zapasowej. Przywracanie danych powinno być wykonywane po stronie administratora lub systemu po odpowiedniej wiadomości e-mail.
-W razie potrzeby kontakt z administratorem agent powinienem o tym zostać poinformowany na samym dole ustawień
+Szczegółowa organizacja ustawień znajduje się w `docs/settings.md`.
 
 ## Powiadomienia
 Aplikacja ma informować o:

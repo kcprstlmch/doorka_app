@@ -423,11 +423,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Image.asset('assets/images/app-sidebar-logo.png', height: 34),
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
-          child: Divider(
-            height: 1,
-            thickness: 1,
-            color: Color(0xFFE4E0D7),
-          ),
+          child: Divider(height: 1, thickness: 1, color: Color(0xFFE4E0D7)),
         ),
         actions: [
           Padding(
@@ -504,11 +500,7 @@ class _BottomNavBar extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Divider(
-              height: 1,
-              thickness: 1,
-              color: Color(0xFFE4E0D7),
-            ),
+            const Divider(height: 1, thickness: 1, color: Color(0xFFE4E0D7)),
             Padding(
               padding: EdgeInsets.fromLTRB(6, 6, 6, bottomInset > 0 ? 2 : 6),
               child: Row(
@@ -615,9 +607,7 @@ class _BottomAccountInitials extends StatelessWidget {
           height: 24,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: selected
-                ? const Color(0xFFE7EFE8)
-                : const Color(0xFFF2F0EA),
+            color: selected ? const Color(0xFFE7EFE8) : const Color(0xFFF2F0EA),
             shape: BoxShape.circle,
             border: Border.all(
               color: selected
@@ -1373,48 +1363,60 @@ class _DashboardPageState extends State<DashboardPage> {
     final nextWeekStart = thisWeekStart.add(const Duration(days: 7));
 
     final thisContacts = data.contacts
-        .where((contact) => _isDashboardContactInPeriod(
-              contact,
-              thisWeekStart,
-              nextWeekStart,
-            ))
+        .where(
+          (contact) => _isDashboardContactInPeriod(
+            contact,
+            thisWeekStart,
+            nextWeekStart,
+          ),
+        )
         .length;
     final previousContacts = data.contacts
-        .where((contact) => _isDashboardContactInPeriod(
-              contact,
-              previousWeekStart,
-              thisWeekStart,
-            ))
+        .where(
+          (contact) => _isDashboardContactInPeriod(
+            contact,
+            previousWeekStart,
+            thisWeekStart,
+          ),
+        )
         .length;
 
     final thisMeetings = data.contacts
-        .where((contact) => _isDashboardMeetingInPeriod(
-              contact,
-              thisWeekStart,
-              nextWeekStart,
-            ))
+        .where(
+          (contact) => _isDashboardMeetingInPeriod(
+            contact,
+            thisWeekStart,
+            nextWeekStart,
+          ),
+        )
         .length;
     final previousMeetings = data.contacts
-        .where((contact) => _isDashboardMeetingInPeriod(
-              contact,
-              previousWeekStart,
-              thisWeekStart,
-            ))
+        .where(
+          (contact) => _isDashboardMeetingInPeriod(
+            contact,
+            previousWeekStart,
+            thisWeekStart,
+          ),
+        )
         .length;
 
     final thisClients = data.clients
-        .where((client) => _isDateInPeriod(
-              client.contractSignedAt,
-              thisWeekStart,
-              nextWeekStart,
-            ))
+        .where(
+          (client) => _isDateInPeriod(
+            client.contractSignedAt,
+            thisWeekStart,
+            nextWeekStart,
+          ),
+        )
         .length;
     final previousClients = data.clients
-        .where((client) => _isDateInPeriod(
-              client.contractSignedAt,
-              previousWeekStart,
-              thisWeekStart,
-            ))
+        .where(
+          (client) => _isDateInPeriod(
+            client.contractSignedAt,
+            previousWeekStart,
+            thisWeekStart,
+          ),
+        )
         .length;
 
     return _WeekDashboardStats(
@@ -2080,7 +2082,9 @@ class _WeekComparisonText extends StatelessWidget {
     return Text(
       '$prefix: $sign$difference / $sign$percent% vs poprzedni tydzień',
       style: TextStyle(
-        color: difference >= 0 ? const Color(0xFF2F5D50) : const Color(0xFFD64545),
+        color: difference >= 0
+            ? const Color(0xFF2F5D50)
+            : const Color(0xFFD64545),
         fontSize: 11,
         fontWeight: FontWeight.w800,
       ),
@@ -2102,7 +2106,9 @@ class _WeekChangeBadge extends StatelessWidget {
     final difference = currentValue - previousValue;
     final percent = _changePercent(currentValue, previousValue);
     final sign = difference > 0 ? '+' : '';
-    final color = difference >= 0 ? const Color(0xFF2F5D50) : const Color(0xFFD64545);
+    final color = difference >= 0
+        ? const Color(0xFF2F5D50)
+        : const Color(0xFFD64545);
 
     return Text(
       '$sign$difference / $sign$percent%',
@@ -2572,10 +2578,7 @@ class _RealizationQueueIntro extends StatelessWidget {
               color: Color(0xFFE7EFE8),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.route_outlined,
-              color: Color(0xFF2F5D50),
-            ),
+            child: const Icon(Icons.route_outlined, color: Color(0xFF2F5D50)),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2647,10 +2650,7 @@ class _CompletedRealizationsShelf extends StatelessWidget {
 }
 
 class _ClientTile extends StatefulWidget {
-  const _ClientTile({
-    required this.client,
-    required this.onClientChanged,
-  });
+  const _ClientTile({required this.client, required this.onClientChanged});
 
   final Client client;
   final ValueChanged<Client> onClientChanged;
@@ -2681,17 +2681,12 @@ class _ClientTileState extends State<_ClientTile> {
         color: statusStyle.color.withValues(alpha: 0.06),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
-          side: BorderSide(
-            color: statusStyle.color.withValues(alpha: 0.38),
-          ),
+          side: BorderSide(color: statusStyle.color.withValues(alpha: 0.38)),
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () async {
-            final updatedClient = await showClientDetailsSheet(
-              context,
-              client,
-            );
+            final updatedClient = await showClientDetailsSheet(context, client);
             if (updatedClient != null) {
               widget.onClientChanged(updatedClient);
             }
@@ -3308,7 +3303,10 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
           accentColor: statusStyle.color,
           rows: [
             _InfoLine('Produkt', _productController.text.trim()),
-            _InfoLine('Typ klienta', _executionMethodDetailsLabel(_executionMethod)),
+            _InfoLine(
+              'Typ klienta',
+              _executionMethodDetailsLabel(_executionMethod),
+            ),
             _InfoLine('Status', statusStyle.label),
             _InfoLine(
               'Data podpisania',
@@ -5216,31 +5214,58 @@ class AccountPage extends StatefulWidget {
 }
 
 class _AccountPageState extends State<AccountPage> {
-  final Set<String> _collapsedSettingsSections = {};
   bool _meetingReminders = false;
   bool _phoneReminders = true;
   bool _visitReminders = true;
-  bool _inactiveContactReminder = true;
-  bool _dailySummary = true;
-  bool _weeklySummary = true;
-  bool _monthlySummary = true;
-  bool _showLeadTile = true;
-  bool _saveLeadTime = true;
-  bool _showLeadSummary = true;
-  bool _longTimerWarning = true;
+  bool _inAppNotifications = true;
+  bool _pushNotifications = false;
+  bool _emailNotifications = false;
+  bool _salesMeetingNotifications = true;
+  bool _dashboardPersonalization = true;
+  bool _dashboardVisibleSections = true;
+  bool _dashboardSectionOrder = true;
+  bool _emailReports = false;
+  bool _weeklyReports = false;
+  bool _monthlyReports = false;
 
-  void _toggleSettingsSection(String title) {
-    setState(() {
-      if (_collapsedSettingsSections.contains(title)) {
-        _collapsedSettingsSections.remove(title);
-      } else {
-        _collapsedSettingsSections.add(title);
-      }
-    });
+  void _showOnboardingPreview() {
+    showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => const _OnboardingPreviewDialog(),
+    );
   }
 
-  bool _isSettingsSectionExpanded(String title) {
-    return !_collapsedSettingsSections.contains(title);
+  void _openSettingsCategory({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return _SettingsDetailPage(
+            title: title,
+            icon: icon,
+            children: children,
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curvedAnimation = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curvedAnimation),
+            child: FadeTransition(opacity: curvedAnimation, child: child),
+          );
+        },
+      ),
+    );
   }
 
   void _showAvatarOptions() {
@@ -5312,242 +5337,332 @@ class _AccountPageState extends State<AccountPage> {
             },
           ),
           const SizedBox(height: 14),
-          _SettingsSection(
-            title: 'Profil',
-            isExpanded: _isSettingsSectionExpanded('Profil'),
-            onToggleExpanded: () => _toggleSettingsSection('Profil'),
-            children: [
-              const _SettingsRow(
-                icon: Icons.badge_outlined,
-                label: 'Imię i nazwisko',
-                value: 'Do uzupełnienia',
-              ),
-              const _SettingsRow(
-                icon: Icons.phone_outlined,
-                label: 'Numer telefonu',
-                value: 'Do uzupełnienia',
-              ),
-              _SettingsRow(
-                icon: Icons.alternate_email_outlined,
-                label: 'Adres e-mail',
-                value: email.isEmpty ? 'Brak e-maila' : email,
-              ),
-              const _SettingsRow(
-                icon: Icons.business_outlined,
-                label: 'Firma lub zespół',
-                value: 'Doorka',
-              ),
-              const _SettingsRow(
-                icon: Icons.solar_power_outlined,
-                label: 'Branża sprzedażowa',
-                value: 'OZE / sprzedaż bezpośrednia',
-              ),
-              _SettingsAction(
-                icon: Icons.lock_reset_outlined,
-                label: 'Zmień hasło',
-                onTap: () {},
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Praca i spotkania',
-            isExpanded: _isSettingsSectionExpanded('Praca i spotkania'),
-            onToggleExpanded: () =>
-                _toggleSettingsSection('Praca i spotkania'),
-            children: const [
-              _SettingsRow(
-                icon: Icons.calendar_month_outlined,
-                label: 'Dni pracy',
-                value: 'Pon. - pt.',
-              ),
-              _SettingsRow(
-                icon: Icons.today_outlined,
-                label: 'Początek tygodnia',
-                value: 'Poniedziałek',
-              ),
-              _SettingsRow(
-                icon: Icons.schedule_outlined,
-                label: 'Domyślne godziny spotkań',
-                value: '18:00, 19:00',
-              ),
-              _SettingsRow(
-                icon: Icons.flag_outlined,
-                label: 'Cel leadowania',
-                value: 'Ustalany przed startem',
-              ),
-            ],
-          ),
-          _SettingsSection(
-            title: 'Kontakty, statusy i produkty',
-            isExpanded: _isSettingsSectionExpanded(
-              'Kontakty, statusy i produkty',
+          _SettingsCategoryTile(
+            icon: Icons.person_outline,
+            title: 'Konto',
+            subtitle: 'Profil, e-mail, hasło i usunięcie konta',
+            onTap: () => _openSettingsCategory(
+              title: 'Konto',
+              icon: Icons.person_outline,
+              children: [
+                const _SettingsRow(
+                  icon: Icons.badge_outlined,
+                  label: 'Imię i nazwisko',
+                  value: 'Do uzupełnienia',
+                ),
+                _SettingsRow(
+                  icon: Icons.alternate_email_outlined,
+                  label: 'Adres e-mail',
+                  value: email.isEmpty ? 'Brak e-maila' : email,
+                ),
+                const _SettingsRow(
+                  icon: Icons.phone_outlined,
+                  label: 'Numer telefonu',
+                  value: 'Opcjonalny',
+                ),
+                const _SettingsRow(
+                  icon: Icons.solar_power_outlined,
+                  label: 'Branża sprzedażowa',
+                  value: 'OZE / sprzedaż bezpośrednia',
+                ),
+                _SettingsAction(
+                  icon: Icons.lock_reset_outlined,
+                  label: 'Zmiana hasła',
+                  onTap: () {},
+                ),
+                _SettingsAction(
+                  icon: Icons.logout_outlined,
+                  label: 'Wyloguj',
+                  onTap: () => _supabase.auth.signOut(),
+                ),
+                _SettingsAction(
+                  icon: Icons.delete_forever_outlined,
+                  label: 'Usuń konto',
+                  destructive: true,
+                  onTap: () {},
+                ),
+              ],
             ),
-            onToggleExpanded: () =>
-                _toggleSettingsSection('Kontakty, statusy i produkty'),
-            children: const [
-              _SettingsRow(
-                icon: Icons.label_outline,
-                label: 'Domyślny status kontaktu',
-                value: 'Szybki kontakt',
-              ),
-              _SettingsRow(
-                icon: Icons.palette_outlined,
-                label: 'Kolory statusów',
-                value: 'Włączone',
-              ),
-              _SettingsRow(
-                icon: Icons.reorder_outlined,
-                label: 'Kolejność statusów',
-                value: 'Ręczna',
-              ),
-              _SettingsRow(
-                icon: Icons.inventory_2_outlined,
-                label: 'Produkty',
-                value: 'PV + ME, ME, UPSELL...',
-              ),
-            ],
           ),
-          _SettingsSection(
-            title: 'Powiadomienia i przypomnienia',
-            isExpanded: _isSettingsSectionExpanded(
-              'Powiadomienia i przypomnienia',
+          _SettingsCategoryTile(
+            icon: Icons.notifications_none,
+            title: 'Powiadomienia',
+            subtitle: 'Kanały, przypomnienia i push',
+            onTap: () => _openSettingsCategory(
+              title: 'Powiadomienia',
+              icon: Icons.notifications_none,
+              children: [
+                _SettingsSwitch(
+                  icon: Icons.app_shortcut_outlined,
+                  label: 'Powiadomienia w aplikacji',
+                  value: _inAppNotifications,
+                  onChanged: (value) =>
+                      setState(() => _inAppNotifications = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.notifications_active_outlined,
+                  label: 'Powiadomienia push',
+                  value: _pushNotifications,
+                  onChanged: (value) =>
+                      setState(() => _pushNotifications = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.alternate_email_outlined,
+                  label: 'Powiadomienia e-mail',
+                  value: _emailNotifications,
+                  onChanged: (value) =>
+                      setState(() => _emailNotifications = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.event_available_outlined,
+                  label: 'Przypomnienia o spotkaniach',
+                  value: _meetingReminders,
+                  onChanged: (value) =>
+                      setState(() => _meetingReminders = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.call_outlined,
+                  label: 'Przypomnienia o klientach do telefonu',
+                  value: _phoneReminders,
+                  onChanged: (value) => setState(() => _phoneReminders = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.place_outlined,
+                  label: 'Przypomnienia o klientach do podjechania',
+                  value: _visitReminders,
+                  onChanged: (value) => setState(() => _visitReminders = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.notifications_outlined,
+                  label: 'Powiadomienia push włączone/wyłączone',
+                  value: _pushNotifications,
+                  onChanged: (value) =>
+                      setState(() => _pushNotifications = value),
+                ),
+              ],
             ),
-            onToggleExpanded: () =>
-                _toggleSettingsSection('Powiadomienia i przypomnienia'),
-            children: [
-              _SettingsSwitch(
-                icon: Icons.event_available_outlined,
-                label: 'Przypomnienia o spotkaniach',
-                value: _meetingReminders,
-                onChanged: (value) => setState(() => _meetingReminders = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.call_outlined,
-                label: 'Telefon do klienta',
-                value: _phoneReminders,
-                onChanged: (value) => setState(() => _phoneReminders = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.place_outlined,
-                label: 'Podjechanie do klienta',
-                value: _visitReminders,
-                onChanged: (value) => setState(() => _visitReminders = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.history_toggle_off_outlined,
-                label: 'Brak aktywności przez 3 dni',
-                value: _inactiveContactReminder,
-                onChanged: (value) =>
-                    setState(() => _inactiveContactReminder = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.wb_sunny_outlined,
-                label: 'Dzienne podsumowanie',
-                value: _dailySummary,
-                onChanged: (value) => setState(() => _dailySummary = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.calendar_view_week_outlined,
-                label: 'Tygodniowe podsumowanie',
-                value: _weeklySummary,
-                onChanged: (value) => setState(() => _weeklySummary = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.insert_chart_outlined,
-                label: 'Miesięczne podsumowanie',
-                value: _monthlySummary,
-                onChanged: (value) => setState(() => _monthlySummary = value),
-              ),
-              const _SettingsRow(
-                icon: Icons.notifications_active_outlined,
-                label: 'Przypomnij później',
-                value: '15 min maks.',
-              ),
-            ],
           ),
-          _SettingsSection(
-            title: 'Dashboard i leadowanie',
-            isExpanded: _isSettingsSectionExpanded('Dashboard i leadowanie'),
-            onToggleExpanded: () =>
-                _toggleSettingsSection('Dashboard i leadowanie'),
-            children: [
-              _SettingsSwitch(
-                icon: Icons.dashboard_customize_outlined,
-                label: 'Pokaż kafelek leadowania',
-                value: _showLeadTile,
-                onChanged: (value) => setState(() => _showLeadTile = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.timer_outlined,
-                label: 'Zapisuj czas leadowania',
-                value: _saveLeadTime,
-                onChanged: (value) => setState(() => _saveLeadTime = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.celebration_outlined,
-                label: 'Podsumowanie po zakończeniu',
-                value: _showLeadSummary,
-                onChanged: (value) => setState(() => _showLeadSummary = value),
-              ),
-              _SettingsSwitch(
-                icon: Icons.warning_amber_outlined,
-                label: 'Ostrzeżenie o długim liczniku',
-                value: _longTimerWarning,
-                onChanged: (value) => setState(() => _longTimerWarning = value),
-              ),
-              const _SettingsRow(
-                icon: Icons.view_agenda_outlined,
-                label: 'Zakres statystyk na start',
-                value: 'Tydzień',
-              ),
-            ],
+          _SettingsCategoryTile(
+            icon: Icons.directions_walk,
+            title: 'System pracy - leadowanie',
+            subtitle: 'Tydzień pracy, cel i status kontaktu',
+            onTap: () => _openSettingsCategory(
+              title: 'System pracy - leadowanie',
+              icon: Icons.directions_walk,
+              children: [
+                const _SettingsRow(
+                  icon: Icons.first_page_outlined,
+                  label: 'Początek tygodnia pracy',
+                  value: 'Poniedziałek',
+                ),
+                const _SettingsRow(
+                  icon: Icons.last_page_outlined,
+                  label: 'Koniec tygodnia pracy',
+                  value: 'Piątek',
+                ),
+                const _SettingsRow(
+                  icon: Icons.flag_outlined,
+                  label: 'Cel leadowania',
+                  value: 'Ustalany przed startem',
+                ),
+                const _SettingsRow(
+                  icon: Icons.sync_alt_outlined,
+                  label: 'Cykl pracy',
+                  value: 'Mieszany',
+                ),
+                const _SettingsRow(
+                  icon: Icons.label_outline,
+                  label: 'Domyślny status nowego kontaktu',
+                  value: 'Umówione spotkanie',
+                ),
+                _SettingsAction(
+                  icon: Icons.auto_awesome_outlined,
+                  label: 'Pokaż onboarding',
+                  onTap: _showOnboardingPreview,
+                ),
+              ],
+            ),
           ),
-          _SettingsSection(
+          _SettingsCategoryTile(
+            icon: Icons.handshake_outlined,
+            title: 'Sprzedaż',
+            subtitle: 'Produkty, godziny spotkań i tryb sprzedaży',
+            onTap: () => _openSettingsCategory(
+              title: 'Sprzedaż',
+              icon: Icons.handshake_outlined,
+              children: [
+                const _SettingsRow(
+                  icon: Icons.inventory_2_outlined,
+                  label: 'Aktywne produkty',
+                  value: 'PV + ME, ME, UPSELL...',
+                ),
+                const _SettingsRow(
+                  icon: Icons.timer_outlined,
+                  label: 'Średni czas trwania spotkania sprzedażowego',
+                  value: 'Do ustalenia',
+                ),
+                const _SettingsRow(
+                  icon: Icons.wb_sunny_outlined,
+                  label: 'Początek dnia sprzedażowego',
+                  value: '12:00',
+                ),
+                const _SettingsRow(
+                  icon: Icons.nights_stay_outlined,
+                  label: 'Koniec dnia sprzedażowego',
+                  value: '18:00',
+                ),
+                _SettingsSwitch(
+                  icon: Icons.notifications_paused_outlined,
+                  label: 'Powiadomienia podczas spotkań sprzedażowych',
+                  value: _salesMeetingNotifications,
+                  onChanged: (value) =>
+                      setState(() => _salesMeetingNotifications = value),
+                ),
+              ],
+            ),
+          ),
+          _SettingsCategoryTile(
+            icon: Icons.dashboard_customize_outlined,
+            title: 'Dashboard',
+            subtitle: 'Widoczność i kolejność sekcji',
+            onTap: () => _openSettingsCategory(
+              title: 'Dashboard',
+              icon: Icons.dashboard_customize_outlined,
+              children: [
+                _SettingsSwitch(
+                  icon: Icons.tune_outlined,
+                  label: 'Personalizacja ekranu głównego',
+                  value: _dashboardPersonalization,
+                  onChanged: (value) =>
+                      setState(() => _dashboardPersonalization = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.visibility_outlined,
+                  label: 'Wybór widocznych sekcji',
+                  value: _dashboardVisibleSections,
+                  onChanged: (value) =>
+                      setState(() => _dashboardVisibleSections = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.reorder_outlined,
+                  label: 'Kolejność sekcji',
+                  value: _dashboardSectionOrder,
+                  onChanged: (value) =>
+                      setState(() => _dashboardSectionOrder = value),
+                ),
+              ],
+            ),
+          ),
+          _SettingsCategoryTile(
+            icon: Icons.summarize_outlined,
+            title: 'Raporty',
+            subtitle: 'E-mail, raporty tygodniowe i miesięczne',
+            onTap: () => _openSettingsCategory(
+              title: 'Raporty',
+              icon: Icons.summarize_outlined,
+              children: [
+                _SettingsRow(
+                  icon: Icons.alternate_email_outlined,
+                  label: 'Adres e-mail do raportów',
+                  value: email.isEmpty ? 'Do uzupełnienia' : email,
+                ),
+                _SettingsSwitch(
+                  icon: Icons.send_outlined,
+                  label: 'Wysyłka raportów e-mail',
+                  value: _emailReports,
+                  onChanged: (value) => setState(() => _emailReports = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.workspace_premium_outlined,
+                  label: 'Raporty tygodniowe (Premium)',
+                  value: _weeklyReports,
+                  onChanged: (value) => setState(() => _weeklyReports = value),
+                ),
+                _SettingsSwitch(
+                  icon: Icons.workspace_premium_outlined,
+                  label: 'Raporty miesięczne (Premium)',
+                  value: _monthlyReports,
+                  onChanged: (value) => setState(() => _monthlyReports = value),
+                ),
+              ],
+            ),
+          ),
+          _SettingsCategoryTile(
+            icon: Icons.palette_outlined,
             title: 'Wygląd aplikacji',
-            isExpanded: _isSettingsSectionExpanded('Wygląd aplikacji'),
-            onToggleExpanded: () => _toggleSettingsSection('Wygląd aplikacji'),
-            children: const [
-              _SettingsRow(
-                icon: Icons.light_mode_outlined,
-                label: 'Motyw',
-                value: 'Jasny',
-              ),
-              _SettingsRow(
-                icon: Icons.format_paint_outlined,
-                label: 'Kolorystyka',
-                value: 'Doorka',
-              ),
-            ],
+            subtitle: 'Motyw i kolorystyka',
+            onTap: () => _openSettingsCategory(
+              title: 'Wygląd aplikacji',
+              icon: Icons.palette_outlined,
+              children: const [
+                _SettingsRow(
+                  icon: Icons.light_mode_outlined,
+                  label: 'Motyw jasny',
+                  value: 'Włączony',
+                ),
+                _SettingsRow(
+                  icon: Icons.dark_mode_outlined,
+                  label: 'Motyw ciemny',
+                  value: 'Wyłączony',
+                ),
+                _SettingsRow(
+                  icon: Icons.brightness_auto_outlined,
+                  label: 'Motyw systemowy',
+                  value: 'Wyłączony',
+                ),
+                _SettingsRow(
+                  icon: Icons.format_paint_outlined,
+                  label: 'Wybór kolorystyki',
+                  value: 'Doorka',
+                ),
+              ],
+            ),
           ),
-          _SettingsSection(
-            title: 'Dane i bezpieczeństwo',
-            isExpanded: _isSettingsSectionExpanded('Dane i bezpieczeństwo'),
-            onToggleExpanded: () =>
-                _toggleSettingsSection('Dane i bezpieczeństwo'),
-            children: [
-              _SettingsAction(
-                icon: Icons.download_outlined,
-                label: 'Eksportuj statystyki',
-                onTap: () {},
-              ),
-              _SettingsAction(
-                icon: Icons.logout_outlined,
-                label: 'Wyloguj ze wszystkich urządzeń',
-                onTap: () {},
-              ),
-              _SettingsAction(
-                icon: Icons.delete_forever_outlined,
-                label: 'Usuń konto',
-                destructive: true,
-                onTap: () {},
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          FilledButton.icon(
-            onPressed: () => _supabase.auth.signOut(),
-            icon: const Icon(Icons.logout),
-            label: const Text('Wyloguj'),
+          _SettingsCategoryTile(
+            icon: Icons.help_outline,
+            title: 'Pomoc i informacje',
+            subtitle: 'FAQ, kontakt, regulamin i wersja aplikacji',
+            onTap: () => _openSettingsCategory(
+              title: 'Pomoc i informacje',
+              icon: Icons.help_outline,
+              children: const [
+                _SettingsRow(
+                  icon: Icons.quiz_outlined,
+                  label: 'FAQ',
+                  value: 'Otwórz',
+                ),
+                _SettingsRow(
+                  icon: Icons.support_agent_outlined,
+                  label: 'Centrum pomocy',
+                  value: 'Otwórz',
+                ),
+                _SettingsRow(
+                  icon: Icons.mail_outline,
+                  label: 'Kontakt',
+                  value: 'Otwórz',
+                ),
+                _SettingsRow(
+                  icon: Icons.bug_report_outlined,
+                  label: 'Zgłoś problem',
+                  value: 'Otwórz',
+                ),
+                _SettingsRow(
+                  icon: Icons.privacy_tip_outlined,
+                  label: 'Polityka prywatności',
+                  value: 'Otwórz',
+                ),
+                _SettingsRow(
+                  icon: Icons.gavel_outlined,
+                  label: 'Regulamin',
+                  value: 'Otwórz',
+                ),
+                _SettingsRow(
+                  icon: Icons.info_outline,
+                  label: 'Wersja aplikacji',
+                  value: '0.1.0',
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -5626,9 +5741,9 @@ class _AccountHeader extends StatelessWidget {
                   name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -5649,62 +5764,132 @@ class _AccountHeader extends StatelessWidget {
   }
 }
 
-class _SettingsSection extends StatelessWidget {
-  const _SettingsSection({
+class _SettingsCategoryTile extends StatelessWidget {
+  const _SettingsCategoryTile({
+    required this.icon,
     required this.title,
-    required this.isExpanded,
-    required this.onToggleExpanded,
-    required this.children,
+    required this.subtitle,
+    required this.onTap,
   });
 
+  final IconData icon;
   final String title;
-  final bool isExpanded;
-  final VoidCallback onToggleExpanded;
-  final List<Widget> children;
+  final String subtitle;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE4E0D7)),
+            ),
             child: Row(
               children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE7EFE8),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(icon, color: const Color(0xFF2F5D50), size: 22),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF172019),
+                          fontSize: 15,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0xFF6A6F68),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                TextButton.icon(
-                  style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF172019),
-                    minimumSize: Size.zero,
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: onToggleExpanded,
-                  icon: Icon(
-                    isExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    size: 18,
-                  ),
-                  iconAlignment: IconAlignment.end,
-                  label: Text(
-                    isExpanded ? 'Zwiń' : 'Rozwiń',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                ),
+                const SizedBox(width: 10),
+                const Icon(Icons.chevron_right, color: Color(0xFF6A6F68)),
               ],
             ),
           ),
-          if (isExpanded)
+        ),
+      ),
+    );
+  }
+}
+
+class _SettingsDetailPage extends StatelessWidget {
+  const _SettingsDetailPage({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final IconData icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFF7F4ED),
+      appBar: AppBar(
+        centerTitle: false,
+        leading: IconButton(
+          tooltip: 'Wróć',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        title: Row(
+          children: [
+            Icon(icon, color: const Color(0xFF2F5D50), size: 22),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ],
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: Color(0xFFE4E0D7)),
+        ),
+      ),
+      body: _PageShell(
+        child: ListView(
+          padding: const EdgeInsets.only(bottom: 22),
+          children: [
             Container(
               decoration: BoxDecoration(
                 color: Colors.white,
@@ -5721,6 +5906,381 @@ class _SettingsSection extends StatelessWidget {
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnboardingPreviewDialog extends StatefulWidget {
+  const _OnboardingPreviewDialog();
+
+  @override
+  State<_OnboardingPreviewDialog> createState() =>
+      _OnboardingPreviewDialogState();
+}
+
+class _OnboardingPreviewDialogState extends State<_OnboardingPreviewDialog> {
+  int _step = 0;
+
+  static const _titles = [
+    'Ustaw rytm pracy',
+    'Wybierz dni leadowania',
+    'Ustal cel',
+  ];
+
+  void _next() {
+    if (_step == _titles.length - 1) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _step++);
+  }
+
+  void _previous() {
+    if (_step == 0) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _step--);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+
+    return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 24),
+      backgroundColor: Colors.transparent,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: screenWidth > 520 ? 460 : 420),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(18),
+          child: Material(
+            color: const Color(0xFFF7F4ED),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
+                  color: const Color(0xFF172019),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Pierwsza konfiguracja',
+                              style: TextStyle(
+                                color: Color(0xFFB9F6CA),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 220),
+                              child: Text(
+                                _titles[_step],
+                                key: ValueKey(_step),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Zamknij',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close, color: Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _OnboardingProgress(step: _step, total: _titles.length),
+                      const SizedBox(height: 18),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 260),
+                        transitionBuilder: (child, animation) {
+                          final offset =
+                              Tween<Offset>(
+                                begin: const Offset(0.08, 0),
+                                end: Offset.zero,
+                              ).animate(
+                                CurvedAnimation(
+                                  parent: animation,
+                                  curve: Curves.easeOutCubic,
+                                ),
+                              );
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: offset,
+                              child: child,
+                            ),
+                          );
+                        },
+                        child: _OnboardingStepContent(
+                          key: ValueKey(_step),
+                          step: _step,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _previous,
+                              child: Text(_step == 0 ? 'Zamknij' : 'Wstecz'),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: FilledButton(
+                              onPressed: _next,
+                              child: Text(
+                                _step == _titles.length - 1
+                                    ? 'Zobacz aplikację'
+                                    : 'Dalej',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OnboardingProgress extends StatelessWidget {
+  const _OnboardingProgress({required this.step, required this.total});
+
+  final int step;
+  final int total;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        for (var index = 0; index < total; index++) ...[
+          Expanded(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              height: 5,
+              decoration: BoxDecoration(
+                color: index <= step
+                    ? const Color(0xFF54D376)
+                    : const Color(0xFFE4E0D7),
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          ),
+          if (index != total - 1) const SizedBox(width: 6),
+        ],
+      ],
+    );
+  }
+}
+
+class _OnboardingStepContent extends StatelessWidget {
+  const _OnboardingStepContent({super.key, required this.step});
+
+  final int step;
+
+  @override
+  Widget build(BuildContext context) {
+    switch (step) {
+      case 0:
+        return const _OnboardingChoiceGrid(
+          title: 'Jaki typ dnia chcesz skonfigurować jako pierwszy?',
+          choices: [
+            _OnboardingChoice(Icons.directions_walk, 'Leadowanie'),
+            _OnboardingChoice(Icons.handshake_outlined, 'Spotkania'),
+            _OnboardingChoice(Icons.event_note_outlined, 'Organizacja'),
+            _OnboardingChoice(Icons.self_improvement_outlined, 'Odpoczynek'),
+          ],
+        );
+      case 1:
+        return const _OnboardingChoiceGrid(
+          title: 'W które dni aplikacja ma domyślnie pokazywać leadowanie?',
+          choices: [
+            _OnboardingChoice(Icons.looks_one_outlined, 'Poniedziałek'),
+            _OnboardingChoice(Icons.looks_two_outlined, 'Wtorek'),
+            _OnboardingChoice(Icons.looks_3_outlined, 'Środa'),
+            _OnboardingChoice(Icons.more_horiz, 'Więcej później'),
+          ],
+        );
+      default:
+        return Column(
+          key: const ValueKey('goal'),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Jaki cel ma podpowiadać Dashboard przed startem leadowania?',
+              style: TextStyle(
+                color: Color(0xFF172019),
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: const [
+                Expanded(
+                  child: _GoalPreviewTile(value: '5', label: 'spokojnie'),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: _GoalPreviewTile(value: '9', label: 'mocny dzień'),
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: _GoalPreviewTile(value: '+', label: 'własny'),
+                ),
+              ],
+            ),
+          ],
+        );
+    }
+  }
+}
+
+class _OnboardingChoice {
+  const _OnboardingChoice(this.icon, this.label);
+
+  final IconData icon;
+  final String label;
+}
+
+class _OnboardingChoiceGrid extends StatelessWidget {
+  const _OnboardingChoiceGrid({required this.title, required this.choices});
+
+  final String title;
+  final List<_OnboardingChoice> choices;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: ValueKey(title),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: Color(0xFF172019),
+            fontSize: 18,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 14),
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: choices.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1.9,
+          ),
+          itemBuilder: (context, index) {
+            final choice = choices[index];
+            return Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: index == 0
+                      ? const Color(0xFF54D376)
+                      : const Color(0xFFE4E0D7),
+                  width: index == 0 ? 2 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(choice.icon, color: const Color(0xFF2F5D50), size: 22),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      choice.label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF172019),
+                        fontWeight: FontWeight.w900,
+                        height: 1.05,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _GoalPreviewTile extends StatelessWidget {
+  const _GoalPreviewTile({required this.value, required this.label});
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 82,
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE4E0D7)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              color: Color(0xFF172019),
+              fontSize: 24,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF6A6F68),
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
         ],
       ),
     );
@@ -5758,7 +6318,7 @@ class _SettingsRow extends StatelessWidget {
   }
 }
 
-class _SettingsSwitch extends StatelessWidget {
+class _SettingsSwitch extends StatefulWidget {
   const _SettingsSwitch({
     required this.icon,
     required this.label,
@@ -5772,13 +6332,37 @@ class _SettingsSwitch extends StatelessWidget {
   final ValueChanged<bool> onChanged;
 
   @override
+  State<_SettingsSwitch> createState() => _SettingsSwitchState();
+}
+
+class _SettingsSwitchState extends State<_SettingsSwitch> {
+  late bool _value;
+
+  @override
+  void initState() {
+    super.initState();
+    _value = widget.value;
+  }
+
+  @override
+  void didUpdateWidget(covariant _SettingsSwitch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.value != widget.value) {
+      _value = widget.value;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return _SettingsBaseRow(
-      icon: icon,
-      label: label,
+      icon: widget.icon,
+      label: widget.label,
       trailing: Switch(
-        value: value,
-        onChanged: onChanged,
+        value: _value,
+        onChanged: (value) {
+          setState(() => _value = value);
+          widget.onChanged(value);
+        },
         activeThumbColor: const Color(0xFF2F5D50),
       ),
     );
