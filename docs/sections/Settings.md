@@ -11,7 +11,7 @@ Po kliknięciu kategorii użytkownik przechodzi do osobnego ekranu szczegółów
 Na ekranie szczegółów użytkownik widzi dopiero konkretne ustawienia.
 
 ## UX/UI ustawień
-Wygląd ekranu ustawień, kafelków kategorii, avatara, popupów i przejść opisuje `docs/UX_UI.md`.
+Wygląd ekranu ustawień, kafelków kategorii, avatara, popupów i przejść opisuje `docs/appereance/UX_UI.md`.
 
 ## Główny ekran ustawień
 Na górze ekranu widoczny jest profil agenta.

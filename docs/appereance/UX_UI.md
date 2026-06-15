@@ -77,7 +77,7 @@ Etap 2 zależy od typu klienta: dla klienta na raty jest to Finansowanie, a dla 
 W szczegółach sprawy W realizacji agent ma widzieć historię zmian etapów/statusów z dokładną datą i godziną zmiany.
 
 ## Konto, ustawienia i onboarding
-Szczegółowa organizacja ekranu Konto, ustawień, preferencji użytkownika oraz podglądu onboardingu znajduje się w `docs/settings.md`.
+Szczegółowa organizacja ekranu Konto, ustawień, preferencji użytkownika oraz podglądu onboardingu znajduje się w `docs/sections/Settings.md`.
 
 Ekran Konto pełni rolę centrum ustawień użytkownika.
 Na górze ekranu widoczny jest profil agenta z inicjałami w delikatnym tle, nazwą użytkownika i adresem e-mail.
