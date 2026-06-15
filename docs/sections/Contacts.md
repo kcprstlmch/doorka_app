@@ -75,7 +75,10 @@ Formularz dodawania kontaktu zawiera podstawowe pola:
 - status
 - uwagi / notatki
 
-Aplikacja może wykrywać potencjalne duplikaty kontaktów po numerze telefonu.
+Aplikacja blokuje duplikaty kontaktów po numerze telefonu dla tego samego agenta.
+Jeśli agent próbuje dodać kontakt z numerem telefonu, który już istnieje na jego aktywnej liście kontaktów, aplikacja pokazuje komunikat i uniemożliwia dodanie kontaktu.
+Porównanie numeru telefonu powinno ignorować spacje, myślniki i nawiasy.
+Duplikaty między różnymi agentami nie są blokowane na tym etapie.
 
 ## Status: Umówione spotkanie
 Po wybraniu statusu Umówione spotkanie formularz pokazuje dodatkowe pola:
@@ -156,6 +159,8 @@ Przy trwałym usuwaniu aplikacja pokazuje popup potwierdzający.
 Nie wymagamy wpisywania słowa USUŃ.
 
 Kontakt z archiwum można przywrócić do aktywnych kontaktów.
+
+Archiwum kontaktów ma być dostępne w ustawieniach konta jako osobna zakładka "Archiwum kontaktów".
 
 ## Przeniesienie do W realizacji
 Kontakt trafia do W realizacji dopiero po decyzji agenta.

@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'app_design.dart';
+import 'app_models.dart';
+
 const _supabaseUrl = 'https://xcroireqjttpofihfnql.supabase.co';
 const _supabaseAnonKey =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhjcm9pcmVxanR0cG9maWhmbnFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAxNjAzODQsImV4cCI6MjA5NTczNjM4NH0.oqZ8J2BiT8A2tw3rvGfXOlF5ZaHY_EQk7S0dF5cridw';
@@ -39,52 +42,7 @@ class DoorkaApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Doorka',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF2F5D50),
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF7F4ED),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
-          surfaceTintColor: Colors.transparent,
-          scrolledUnderElevation: 0,
-          elevation: 0,
-        ),
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          fillColor: Colors.white,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD8D4CA)),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFFD8D4CA)),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(8),
-            borderSide: const BorderSide(color: Color(0xFF2F5D50), width: 2),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-        outlinedButtonTheme: OutlinedButtonThemeData(
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
-            ),
-          ),
-        ),
-        useMaterial3: true,
-      ),
+      theme: buildAppTheme(),
       home: const AuthGate(),
     );
   }
@@ -555,7 +513,7 @@ class _BottomNavButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = selected ? const Color(0xFF172019) : const Color(0xFF6A6F68);
+    final color = selected ? appTextPrimary : appTextSecondary;
 
     return InkWell(
       borderRadius: BorderRadius.circular(8),
@@ -581,7 +539,7 @@ class _BottomNavButton extends StatelessWidget {
               style: TextStyle(
                 color: color,
                 fontSize: 10.5,
-                fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
             ),
           ],
@@ -609,22 +567,16 @@ class _BottomAccountInitials extends StatelessWidget {
           decoration: BoxDecoration(
             color: selected ? const Color(0xFFE7EFE8) : const Color(0xFFF2F0EA),
             shape: BoxShape.circle,
-            border: Border.all(
-              color: selected
-                  ? const Color(0xFF2F5D50)
-                  : const Color(0xFFE4E0D7),
-            ),
+            border: Border.all(color: selected ? appBrand : appBorder),
           ),
           clipBehavior: Clip.antiAlias,
           child: avatarPath == null || avatarPath.isEmpty
               ? Text(
                   _userInitials(user),
                   style: TextStyle(
-                    color: selected
-                        ? const Color(0xFF2F5D50)
-                        : const Color(0xFF6A6F68),
+                    color: selected ? appBrand : appTextSecondary,
                     fontSize: 9.5,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                   ),
                 )
               : _AvatarImage(path: avatarPath),
@@ -786,7 +738,7 @@ String _userInitials(User? user) {
 }
 
 Future<void> _callPhone(BuildContext context, String phone) async {
-  final uri = Uri(scheme: 'tel', path: phone.replaceAll(' ', ''));
+  final uri = Uri(scheme: 'tel', path: _normalizePhone(phone));
   final launched = await launchUrl(uri);
   if (launched || !context.mounted) return;
 
@@ -795,6 +747,10 @@ Future<void> _callPhone(BuildContext context, String phone) async {
     ..showSnackBar(
       const SnackBar(content: Text('Nie udało się wykonać połączenia.')),
     );
+}
+
+String _normalizePhone(String phone) {
+  return phone.replaceAll(RegExp(r'[\s\-\(\)]'), '');
 }
 
 Future<void> _openMap(BuildContext context, String address) async {
@@ -812,136 +768,6 @@ Future<void> _openMap(BuildContext context, String address) async {
     );
 }
 
-class Contact {
-  const Contact({
-    required this.id,
-    required this.contactName,
-    required this.phone,
-    required this.address,
-    required this.status,
-    required this.note,
-    required this.contactDate,
-    required this.contactTime,
-    required this.contactProduct,
-    required this.contactQuality,
-    required this.contactNotification,
-  });
-
-  final String id;
-  final String contactName;
-  final String phone;
-  final String address;
-  final String status;
-  final String note;
-  final DateTime? contactDate;
-  final String contactTime;
-  final String contactProduct;
-  final String contactQuality;
-  final DateTime? contactNotification;
-
-  factory Contact.fromMap(Map<String, dynamic> data) {
-    final rawStatus = data['status']?.toString() ?? 'scheduled_meeting';
-    final status = switch (rawStatus) {
-      'signed_contract' => 'scheduled_meeting',
-      'visit_required' => 'to_visit',
-      'contact' => 'to_call',
-      'lead' => 'scheduled_meeting',
-      'client' => 'scheduled_meeting',
-      'lost' => 'not_interested',
-      _ =>
-        _contactStatuses.any((status) => status.value == rawStatus)
-            ? rawStatus
-            : 'scheduled_meeting',
-    };
-
-    return Contact(
-      id: data['id']?.toString() ?? '',
-      contactName: data['contact_name']?.toString() ?? '',
-      phone: data['phone']?.toString() ?? '',
-      address: data['address']?.toString() ?? '',
-      status: status,
-      note: data['note']?.toString() ?? '',
-      contactDate: DateTime.tryParse(data['contact_date']?.toString() ?? ''),
-      contactTime: data['contact_time']?.toString() ?? '',
-      contactProduct: data['contact_product']?.toString() ?? '',
-      contactQuality: data['contact_quality']?.toString() ?? '',
-      contactNotification: DateTime.tryParse(
-        data['contact_notification']?.toString() ?? '',
-      ),
-    );
-  }
-}
-
-class Client {
-  const Client({
-    required this.id,
-    required this.clientName,
-    required this.phone,
-    required this.correspondenceAddress,
-    required this.installationAddress,
-    required this.productName,
-    required this.executionMethod,
-    required this.status,
-    required this.contractSignedAt,
-    required this.sourceContactId,
-  });
-
-  final String id;
-  final String sourceContactId;
-  final String clientName;
-  final String phone;
-  final String correspondenceAddress;
-  final String installationAddress;
-  final String productName;
-  final String executionMethod;
-  final String status;
-  final DateTime? contractSignedAt;
-
-  Client copyWith({
-    String? clientName,
-    String? phone,
-    String? correspondenceAddress,
-    String? installationAddress,
-    String? productName,
-    String? executionMethod,
-    String? status,
-  }) {
-    return Client(
-      id: id,
-      sourceContactId: sourceContactId,
-      clientName: clientName ?? this.clientName,
-      phone: phone ?? this.phone,
-      correspondenceAddress:
-          correspondenceAddress ?? this.correspondenceAddress,
-      installationAddress: installationAddress ?? this.installationAddress,
-      productName: productName ?? this.productName,
-      executionMethod: executionMethod ?? this.executionMethod,
-      status: status ?? this.status,
-      contractSignedAt: contractSignedAt,
-    );
-  }
-
-  factory Client.fromMap(Map<String, dynamic> data) {
-    final rawExecutionMethod =
-        (data['execution_method'] ?? data['payment_method'])?.toString() ?? '';
-
-    return Client(
-      id: data['id']?.toString() ?? '',
-      sourceContactId: data['source_contact_id']?.toString() ?? '',
-      clientName: data['client_name']?.toString() ?? '',
-      phone: data['phone']?.toString() ?? '',
-      correspondenceAddress: data['correspondence_address']?.toString() ?? '',
-      installationAddress: data['installation_address']?.toString() ?? '',
-      productName: data['product_name']?.toString() ?? '',
-      executionMethod: _normalizeExecutionMethod(rawExecutionMethod),
-      status: data['status']?.toString() ?? 'signed_contract',
-      contractSignedAt: DateTime.tryParse(
-        data['contract_signed_at']?.toString() ?? '',
-      ),
-    );
-  }
-}
-
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
 
@@ -950,10 +776,15 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardData {
-  const _DashboardData({required this.contacts, required this.clients});
+  const _DashboardData({
+    required this.contacts,
+    required this.clients,
+    required this.leadSessions,
+  });
 
   final List<Contact> contacts;
   final List<Client> clients;
+  final List<Map<String, dynamic>> leadSessions;
 }
 
 class _DashboardPageState extends State<DashboardPage> {
@@ -994,6 +825,7 @@ class _DashboardPageState extends State<DashboardPage> {
           .isFilter('archived_at', null)
           .isFilter('moved_to_client_at', null),
       _supabase.from('clients').select().isFilter('archived_at', null),
+      _fetchLeadSessionsForDashboard(),
     ]);
 
     final contacts = results[0]
@@ -1003,7 +835,22 @@ class _DashboardPageState extends State<DashboardPage> {
         .map((item) => Client.fromMap(Map<String, dynamic>.from(item)))
         .toList();
 
-    return _DashboardData(contacts: contacts, clients: clients);
+    return _DashboardData(
+      contacts: contacts,
+      clients: clients,
+      leadSessions: results[2]
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList(),
+    );
+  }
+
+  Future<List<dynamic>> _fetchLeadSessionsForDashboard() async {
+    try {
+      final remoteSessions = await _supabase.from('lead_sessions').select();
+      return [...remoteSessions, ..._localLeadSessions];
+    } catch (_) {
+      return List<Map<String, dynamic>>.from(_localLeadSessions);
+    }
   }
 
   void _reload() {
@@ -1262,7 +1109,8 @@ class _DashboardPageState extends State<DashboardPage> {
           }
 
           final data =
-              snapshot.data ?? const _DashboardData(contacts: [], clients: []);
+              snapshot.data ??
+              const _DashboardData(contacts: [], clients: [], leadSessions: []);
           final tomorrow = DateTime.now().add(const Duration(days: 1));
           final tomorrowMeetings = data.contacts.where((contact) {
             return contact.status == 'scheduled_meeting' &&
@@ -1362,25 +1210,6 @@ class _DashboardPageState extends State<DashboardPage> {
     final previousWeekStart = thisWeekStart.subtract(const Duration(days: 7));
     final nextWeekStart = thisWeekStart.add(const Duration(days: 7));
 
-    final thisContacts = data.contacts
-        .where(
-          (contact) => _isDashboardContactInPeriod(
-            contact,
-            thisWeekStart,
-            nextWeekStart,
-          ),
-        )
-        .length;
-    final previousContacts = data.contacts
-        .where(
-          (contact) => _isDashboardContactInPeriod(
-            contact,
-            previousWeekStart,
-            thisWeekStart,
-          ),
-        )
-        .length;
-
     final thisMeetings = data.contacts
         .where(
           (contact) => _isDashboardMeetingInPeriod(
@@ -1419,32 +1248,54 @@ class _DashboardPageState extends State<DashboardPage> {
         )
         .length;
 
+    final thisLeadSeconds = _leadSecondsInPeriod(
+      data.leadSessions,
+      thisWeekStart,
+      nextWeekStart,
+    );
+    final previousLeadSeconds = _leadSecondsInPeriod(
+      data.leadSessions,
+      previousWeekStart,
+      thisWeekStart,
+    );
+
     return _WeekDashboardStats(
-      contacts: _WeekMetric(
-        label: 'Kontakty',
-        value: thisContacts,
-        previousValue: previousContacts,
+      processedContracts: _WeekMetric(
+        label: 'Umowy',
+        value: thisClients,
+        previousValue: previousClients,
       ),
       meetings: _WeekMetric(
         label: 'Spotkania',
         value: thisMeetings,
         previousValue: previousMeetings,
       ),
-      clients: _WeekMetric(
-        label: 'Realizacje',
-        value: thisClients,
-        previousValue: previousClients,
+      fieldTime: _WeekMetric(
+        label: 'Czas w terenie',
+        value: thisLeadSeconds,
+        previousValue: previousLeadSeconds,
+        formatter: (seconds) => _formatDuration(Duration(seconds: seconds)),
       ),
     );
   }
 
-  bool _isDashboardContactInPeriod(
-    Contact contact,
+  int _leadSecondsInPeriod(
+    List<Map<String, dynamic>> sessions,
     DateTime start,
     DateTime end,
   ) {
-    final date = contact.contactDate ?? contact.contactNotification;
-    return _isDateInPeriod(date, start, end);
+    return sessions
+        .where((session) {
+          final date = DateTime.tryParse(
+            session['session_date']?.toString() ?? '',
+          );
+          return _isDateInPeriod(date, start, end);
+        })
+        .fold<int>(
+          0,
+          (sum, session) =>
+              sum + (session['work_seconds'] as num? ?? 0).toInt(),
+        );
   }
 
   bool _isDashboardMeetingInPeriod(
@@ -1500,7 +1351,7 @@ class _ActiveDashboardTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: const Color(0xFF101512),
+        color: appWorkDark,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -1516,7 +1367,7 @@ class _ActiveDashboardTile extends StatelessWidget {
                       width: 10,
                       height: 10,
                       decoration: const BoxDecoration(
-                        color: Color(0xFF4CAF50),
+                        color: appSuccess,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -1527,8 +1378,8 @@ class _ActiveDashboardTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Color(0xFFEAF3EC),
-                          fontWeight: FontWeight.w900,
+                          color: appSurfaceSoft,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                     ),
@@ -1539,14 +1390,14 @@ class _ActiveDashboardTile extends StatelessWidget {
                   RichText(
                     text: TextSpan(
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w900,
+                        color: appSurface,
+                        fontWeight: FontWeight.w700,
                       ),
                       children: [
                         const TextSpan(text: 'Czas leadowania'),
                         const TextSpan(
                           text: ' | ',
-                          style: TextStyle(color: Color(0xFFC9C2B5)),
+                          style: TextStyle(color: appBorderStrong),
                         ),
                         TextSpan(text: _formatDuration(elapsed)),
                       ],
@@ -1556,8 +1407,8 @@ class _ActiveDashboardTile extends StatelessWidget {
                   Text(
                     'Leadowanie',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w900,
+                      color: appSurface,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 const SizedBox(height: 8),
@@ -1570,24 +1421,24 @@ class _ActiveDashboardTile extends StatelessWidget {
                       Text(
                         'Cel na dzisiaj: $dailyGoal',
                         style: const TextStyle(
-                          color: Color(0xFFDDEADF),
-                          fontWeight: FontWeight.w800,
+                          color: appWorkText,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     if (isStarted && dailyGoal != null)
                       Text(
                         'Obecnie: $currentMeetings',
                         style: const TextStyle(
-                          color: Color(0xFFDDEADF),
-                          fontWeight: FontWeight.w800,
+                          color: appWorkText,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     if (dailyGoal != null)
                       Text(
                         'Kontakty: $currentContacts',
                         style: const TextStyle(
-                          color: Color(0xFFDDEADF),
-                          fontWeight: FontWeight.w800,
+                          color: appWorkText,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     if (!isStarted && dailyGoal == null)
@@ -1621,8 +1472,8 @@ class _ActiveScheduleButton extends StatelessWidget {
       height: 70,
       child: FilledButton(
         style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF62BE72),
-          foregroundColor: Colors.white,
+          backgroundColor: appSuccess,
+          foregroundColor: appSurface,
           padding: EdgeInsets.zero,
           shape: const CircleBorder(),
         ),
@@ -1634,7 +1485,7 @@ class _ActiveScheduleButton extends StatelessWidget {
             SizedBox(height: 2),
             Text(
               'Umów',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
             ),
           ],
         ),
@@ -1661,8 +1512,8 @@ class _SetGoalButton extends StatelessWidget {
       },
       child: FilledButton.icon(
         style: FilledButton.styleFrom(
-          backgroundColor: const Color(0xFF2563A9),
-          foregroundColor: Colors.white,
+          backgroundColor: appInfo,
+          foregroundColor: appSurface,
           minimumSize: const Size(0, 34),
           padding: const EdgeInsets.symmetric(horizontal: 12),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1674,7 +1525,7 @@ class _SetGoalButton extends StatelessWidget {
         icon: const Icon(Icons.check, size: 16),
         label: const Text(
           'Ustal cel',
-          style: TextStyle(fontWeight: FontWeight.w900),
+          style: TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
     );
@@ -1724,8 +1575,8 @@ class _LeadControlButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final isStart = label == 'Start';
     final size = large ? (isStart ? 70.0 : 82.0) : 74.0;
-    final backgroundColor = isStart ? const Color(0xFF62BE72) : Colors.white;
-    final foregroundColor = isStart ? Colors.white : const Color(0xFF172019);
+    final backgroundColor = isStart ? appSuccess : appSurface;
+    final foregroundColor = isStart ? appSurface : appTextPrimary;
 
     return InkWell(
       borderRadius: BorderRadius.circular(18),
@@ -1754,7 +1605,7 @@ class _LeadControlButton extends StatelessWidget {
               style: TextStyle(
                 color: foregroundColor,
                 fontSize: 12,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
@@ -1789,7 +1640,7 @@ class _LeadDayActions extends StatelessWidget {
       _LeadDayAction(
         Icons.person_add_alt_1_outlined,
         'Szybki kontakt',
-        const Color(0xFF3B6EA8),
+        appInfo,
         onQuickContact,
       ),
       _LeadDayAction(
@@ -1798,23 +1649,13 @@ class _LeadDayActions extends StatelessWidget {
         const Color(0xFF8A6F20),
         onQuickNote,
       ),
-      _LeadDayAction(
-        Icons.map_outlined,
-        'Zapisz teren',
-        const Color(0xFF6D6A75),
-        onSaveArea,
-      ),
+      _LeadDayAction(Icons.map_outlined, 'Zapisz teren', appMuted, onSaveArea),
       if (isPaused) ...[
-        _LeadDayAction(
-          Icons.play_arrow_rounded,
-          'Wznów',
-          const Color(0xFF2F5D50),
-          onResume,
-        ),
+        _LeadDayAction(Icons.play_arrow_rounded, 'Wznów', appBrand, onResume),
         _LeadDayAction(
           Icons.stop_rounded,
           'Koniec',
-          const Color(0xFFA8473B),
+          appDanger,
           onFinish,
           filled: true,
         ),
@@ -1822,7 +1663,7 @@ class _LeadDayActions extends StatelessWidget {
         _LeadDayAction(
           Icons.pause_rounded,
           'Przerwa',
-          const Color(0xFFA8473B),
+          appDanger,
           onPause,
           filled: true,
         ),
@@ -1850,10 +1691,8 @@ class _LeadDayActionButton extends StatelessWidget {
       height: 76,
       child: OutlinedButton(
         style: OutlinedButton.styleFrom(
-          backgroundColor: action.filled ? action.color : Colors.white,
-          foregroundColor: action.filled
-              ? Colors.white
-              : const Color(0xFF172019),
+          backgroundColor: action.filled ? action.color : appSurface,
+          foregroundColor: action.filled ? appSurface : appTextPrimary,
           side: BorderSide(color: action.color, width: 1.5),
           padding: const EdgeInsets.symmetric(horizontal: 6),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1865,14 +1704,14 @@ class _LeadDayActionButton extends StatelessWidget {
             Icon(
               action.icon,
               size: 20,
-              color: action.filled ? Colors.white : action.color,
+              color: action.filled ? appSurface : action.color,
             ),
             const SizedBox(height: 5),
             Text(
               action.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900),
+              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
             ),
           ],
         ),
@@ -1899,18 +1738,18 @@ class _LeadDayAction {
 
 class _WeekDashboardStats {
   const _WeekDashboardStats({
-    required this.contacts,
+    required this.processedContracts,
     required this.meetings,
-    required this.clients,
+    required this.fieldTime,
   });
 
-  final _WeekMetric contacts;
+  final _WeekMetric processedContracts;
   final _WeekMetric meetings;
-  final _WeekMetric clients;
+  final _WeekMetric fieldTime;
 
-  int get total => contacts.value + meetings.value + clients.value;
+  int get total => processedContracts.value + meetings.value;
   int get previousTotal =>
-      contacts.previousValue + meetings.previousValue + clients.previousValue;
+      processedContracts.previousValue + meetings.previousValue;
 }
 
 class _WeekMetric {
@@ -1918,13 +1757,17 @@ class _WeekMetric {
     required this.label,
     required this.value,
     required this.previousValue,
+    this.formatter,
   });
 
   final String label;
   final int value;
   final int previousValue;
+  final String Function(int value)? formatter;
 
   int get difference => value - previousValue;
+  String get displayValue =>
+      formatter == null ? value.toString() : formatter!(value);
 }
 
 class _WeeklyDashboardTile extends StatelessWidget {
@@ -1943,8 +1786,8 @@ class _WeeklyDashboardTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFD8D4CA)),
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1955,12 +1798,12 @@ class _WeeklyDashboardTile extends StatelessWidget {
               const Expanded(
                 child: Text(
                   'W tym tygodniu',
-                  style: TextStyle(fontWeight: FontWeight.w900),
+                  style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
               TextButton.icon(
                 style: TextButton.styleFrom(
-                  foregroundColor: const Color(0xFF172019),
+                  foregroundColor: appTextPrimary,
                   minimumSize: Size.zero,
                   padding: const EdgeInsets.symmetric(horizontal: 2),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -1975,7 +1818,7 @@ class _WeeklyDashboardTile extends StatelessWidget {
                 iconAlignment: IconAlignment.end,
                 label: Text(
                   isExpanded ? 'Zwiń' : 'Rozwiń',
-                  style: const TextStyle(fontWeight: FontWeight.w900),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
             ],
@@ -1983,25 +1826,27 @@ class _WeeklyDashboardTile extends StatelessWidget {
           if (isExpanded) ...[
             const SizedBox(height: 10),
             Text(
-              stats.total.toString(),
+              stats.processedContracts.value.toString(),
               style: Theme.of(
                 context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w900),
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 2),
             _WeekComparisonText(
-              currentValue: stats.total,
-              previousValue: stats.previousTotal,
-              prefix: 'Wynik tygodnia',
+              currentValue: stats.processedContracts.value,
+              previousValue: stats.processedContracts.previousValue,
+              prefix: 'Umowy przeprocesowane',
             ),
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(child: _WeekMetricBox(metric: stats.contacts)),
+                Expanded(
+                  child: _WeekMetricBox(metric: stats.processedContracts),
+                ),
                 const SizedBox(width: 8),
                 Expanded(child: _WeekMetricBox(metric: stats.meetings)),
                 const SizedBox(width: 8),
-                Expanded(child: _WeekMetricBox(metric: stats.clients)),
+                Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
               ],
             ),
           ],
@@ -2021,9 +1866,9 @@ class _WeekMetricBox extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFAF9F5),
+        color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE4E0D7)),
+        border: Border.all(color: appBorder),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2033,10 +1878,10 @@ class _WeekMetricBox extends StatelessWidget {
             spacing: 5,
             children: [
               Text(
-                metric.value.toString(),
+                metric.displayValue,
                 style: const TextStyle(
                   fontSize: 20,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
               _WeekChangeBadge(
@@ -2051,9 +1896,9 @@ class _WeekMetricBox extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: Color(0xFF6A6F68),
+              color: appTextSecondary,
               fontSize: 11,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -2082,11 +1927,9 @@ class _WeekComparisonText extends StatelessWidget {
     return Text(
       '$prefix: $sign$difference / $sign$percent% vs poprzedni tydzień',
       style: TextStyle(
-        color: difference >= 0
-            ? const Color(0xFF2F5D50)
-            : const Color(0xFFD64545),
+        color: difference >= 0 ? appBrand : appDanger,
         fontSize: 11,
-        fontWeight: FontWeight.w800,
+        fontWeight: FontWeight.w600,
       ),
     );
   }
@@ -2106,16 +1949,14 @@ class _WeekChangeBadge extends StatelessWidget {
     final difference = currentValue - previousValue;
     final percent = _changePercent(currentValue, previousValue);
     final sign = difference > 0 ? '+' : '';
-    final color = difference >= 0
-        ? const Color(0xFF2F5D50)
-        : const Color(0xFFD64545);
+    final color = difference >= 0 ? appBrand : appDanger;
 
     return Text(
       '$sign$difference / $sign$percent%',
       style: TextStyle(
         color: color,
         fontSize: 9.5,
-        fontWeight: FontWeight.w900,
+        fontWeight: FontWeight.w700,
       ),
     );
   }
@@ -2150,8 +1991,8 @@ class _DashboardList extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFD8D4CA)),
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -2163,14 +2004,14 @@ class _DashboardList extends StatelessWidget {
                 child: Text(
                   title,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
               if (showExpandAction)
                 TextButton.icon(
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF2F5D50),
+                    foregroundColor: appBrand,
                     minimumSize: const Size(0, 36),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2185,7 +2026,7 @@ class _DashboardList extends StatelessWidget {
                   iconAlignment: IconAlignment.end,
                   label: Text(
                     isExpanded ? 'Zwiń' : 'Rozwiń',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
             ],
@@ -2193,15 +2034,11 @@ class _DashboardList extends StatelessWidget {
           if (!showExpandAction || isExpanded) ...[
             const SizedBox(height: 10),
             if (contacts.isEmpty)
-              Text(emptyText, style: const TextStyle(color: Color(0xFF6A6F68)))
+              Text(emptyText, style: const TextStyle(color: appTextSecondary))
             else
               for (var index = 0; index < contacts.length; index++) ...[
                 if (index > 0)
-                  const Divider(
-                    height: 10,
-                    thickness: 1,
-                    color: Color(0xFFE4E0D7),
-                  ),
+                  const Divider(height: 10, thickness: 1, color: appBorder),
                 _RecentContactTile(contact: contacts[index]),
               ],
           ],
@@ -2222,8 +2059,8 @@ class _QuickNotesList extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFD8D4CA)),
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -2233,13 +2070,13 @@ class _QuickNotesList extends StatelessWidget {
             'Szybkie notatki',
             style: Theme.of(
               context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 10),
           for (var index = 0; index < notes.length; index++) ...[
-            if (index > 0) const Divider(height: 10, color: Color(0xFFE4E0D7)),
+            if (index > 0) const Divider(height: 10, color: appBorder),
             Material(
-              color: const Color(0xFFFAF9F5),
+              color: appSurfaceSoft,
               borderRadius: BorderRadius.circular(8),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
@@ -2280,7 +2117,7 @@ class _SummaryRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(child: Text(label)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -2347,7 +2184,7 @@ class _RecentContactTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFFFAF9F5),
+      color: appSurfaceSoft,
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
@@ -2358,13 +2195,13 @@ class _RecentContactTile extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 18,
-                backgroundColor: const Color(0xFFE7EFE8),
-                foregroundColor: const Color(0xFF2F5D50),
+                backgroundColor: appBrandSoft,
+                foregroundColor: appBrand,
                 child: Text(
                   _initials(contact.contactName),
                   style: const TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -2379,7 +2216,7 @@ class _RecentContactTile extends StatelessWidget {
                           : contact.contactName,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: 3),
                     Text(
@@ -2387,7 +2224,7 @@ class _RecentContactTile extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Color(0xFF6A6F68),
+                        color: appTextSecondary,
                         fontSize: 12,
                       ),
                     ),
@@ -2398,9 +2235,9 @@ class _RecentContactTile extends StatelessWidget {
               Text(
                 _statusByValue(contact.status).label,
                 style: const TextStyle(
-                  color: Color(0xFF2F5D50),
+                  color: appBrand,
                   fontSize: 11,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -2565,7 +2402,7 @@ class _RealizationQueueIntro extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF172019),
+        color: appTextPrimary,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -2575,10 +2412,10 @@ class _RealizationQueueIntro extends StatelessWidget {
             height: 42,
             alignment: Alignment.center,
             decoration: const BoxDecoration(
-              color: Color(0xFFE7EFE8),
+              color: appBrandSoft,
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.route_outlined, color: Color(0xFF2F5D50)),
+            child: const Icon(Icons.route_outlined, color: appBrand),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -2588,8 +2425,8 @@ class _RealizationQueueIntro extends StatelessWidget {
                 const Text(
                   'Kolejka realizacji',
                   style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w900,
+                    color: appSurface,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -2597,7 +2434,7 @@ class _RealizationQueueIntro extends StatelessWidget {
                   '$activeCount aktywne sprawy'
                   '${completedCount > 0 ? ' | $completedCount zakończone niżej' : ''}',
                   style: const TextStyle(
-                    color: Color(0xFFDDEADF),
+                    color: appWorkText,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2621,26 +2458,26 @@ class _CompletedRealizationsShelf extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFAF9F5),
+        color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE4E0D7)),
+        border: Border.all(color: appBorder),
       ),
       child: Row(
         children: [
-          const Icon(Icons.inventory_2_outlined, color: Color(0xFF6A6F68)),
+          const Icon(Icons.inventory_2_outlined, color: appTextSecondary),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               'Zakończone realizacje: ${clients.length}',
-              style: const TextStyle(fontWeight: FontWeight.w900),
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
           const Text(
             'Lista później',
             style: TextStyle(
-              color: Color(0xFF6A6F68),
+              color: appTextSecondary,
               fontSize: 12,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -2722,7 +2559,7 @@ class _ClientTileState extends State<_ClientTile> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       if (address.isNotEmpty)
                         Text(
@@ -2730,9 +2567,9 @@ class _ClientTileState extends State<_ClientTile> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: Color(0xFF6A6F68),
+                            color: appTextSecondary,
                             fontSize: 12,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       const SizedBox(height: 7),
@@ -2741,7 +2578,7 @@ class _ClientTileState extends State<_ClientTile> {
                         child: LinearProgressIndicator(
                           value: progress,
                           minHeight: 6,
-                          backgroundColor: Colors.white,
+                          backgroundColor: appSurface,
                           valueColor: AlwaysStoppedAnimation<Color>(
                             statusStyle.color,
                           ),
@@ -2759,9 +2596,9 @@ class _ClientTileState extends State<_ClientTile> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: Color(0xFF6A6F68),
+                            color: appTextSecondary,
                             fontSize: 11,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                     ],
@@ -2852,7 +2689,7 @@ class _StageStepPill extends StatelessWidget {
           height: active ? 32 : 28,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: active ? color : Colors.white,
+            color: active ? color : appSurface,
             shape: BoxShape.circle,
             border: active
                 ? null
@@ -2861,9 +2698,9 @@ class _StageStepPill extends StatelessWidget {
           child: Text(
             number,
             style: TextStyle(
-              color: active ? Colors.white : color,
+              color: active ? appSurface : color,
               fontSize: active ? 13 : 12,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w700,
             ),
           ),
         ),
@@ -2877,11 +2714,9 @@ class _StageStepPill extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                  color: active
-                      ? const Color(0xFF172019)
-                      : const Color(0xFF6A6F68),
+                  color: active ? appTextPrimary : appTextSecondary,
                   fontSize: 10.5,
-                  fontWeight: FontWeight.w900,
+                  fontWeight: FontWeight.w700,
                   height: 1.05,
                 ),
               ),
@@ -2891,7 +2726,7 @@ class _StageStepPill extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Color(0xFF6A6F68),
+                    color: appTextSecondary,
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2917,14 +2752,6 @@ String _executionMethodDetailsLabel(String method) {
     'gotowka' => 'Klient gotówkowy',
     'finansowanie' => 'Klient na raty',
     _ => '',
-  };
-}
-
-String _normalizeExecutionMethod(String method) {
-  return switch (method) {
-    'gotowka' || 'cash' => 'gotowka',
-    'finansowanie' || 'credit' || 'kredyt' || 'raty' => 'finansowanie',
-    _ => 'finansowanie',
   };
 }
 
@@ -3115,7 +2942,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
     );
     _productController = TextEditingController(text: client.productName);
     _status = client.status;
-    _executionMethod = _normalizeExecutionMethod(client.executionMethod);
+    _executionMethod = normalizeExecutionMethod(client.executionMethod);
   }
 
   @override
@@ -3206,14 +3033,14 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
                             ? 'Bez nazwy'
                             : _nameController.text.trim(),
                         style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         statusStyle.label,
                         style: TextStyle(
                           color: statusStyle.color,
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
@@ -3455,35 +3282,28 @@ class _ClientInfoCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: appSurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: accentColor ?? const Color(0xFFD8D4CA)),
+        border: Border.all(color: accentColor ?? appBorderStrong),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: accentColor ?? const Color(0xFF2F5D50),
-              ),
+              Icon(icon, size: 20, color: accentColor ?? appBrand),
               const SizedBox(width: 8),
               Text(
                 title,
                 style: Theme.of(
                   context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
             ],
           ),
           const SizedBox(height: 12),
           if (visibleRows.isEmpty)
-            const Text(
-              'Brak danych',
-              style: TextStyle(color: Color(0xFF6A6F68)),
-            )
+            const Text('Brak danych', style: TextStyle(color: appTextSecondary))
           else
             for (final row in visibleRows)
               Padding(
@@ -3850,16 +3670,16 @@ class _SelectedContactsBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFAF9F5),
+        color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE4E0D7)),
+        border: Border.all(color: appBorder),
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               'Zaznaczone kontakty: $count',
-              style: const TextStyle(fontWeight: FontWeight.w900),
+              style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ),
           OutlinedButton.icon(
@@ -3950,14 +3770,10 @@ class _StatusCirclePlaceholder extends StatelessWidget {
       width: 42,
       height: 42,
       decoration: BoxDecoration(
-        color: (isHidden ? const Color(0xFFD9D3C6) : color).withValues(
-          alpha: 0.16,
-        ),
+        color: (isHidden ? appBorderStrong : color).withValues(alpha: 0.16),
         shape: BoxShape.circle,
         border: Border.all(
-          color: (isHidden ? const Color(0xFFD9D3C6) : color).withValues(
-            alpha: 0.26,
-          ),
+          color: (isHidden ? appBorderStrong : color).withValues(alpha: 0.26),
         ),
       ),
     );
@@ -3986,12 +3802,12 @@ class _StatusCircle extends StatelessWidget {
           width: 42,
           height: 42,
           decoration: BoxDecoration(
-            color: isHidden ? const Color(0xFFD9D3C6) : status.color,
+            color: isHidden ? appBorderStrong : status.color,
             shape: BoxShape.circle,
           ),
           child: Icon(
             isHidden ? Icons.visibility_off : Icons.visibility,
-            color: Colors.white.withValues(alpha: isHidden ? 0.34 : 0.24),
+            color: appSurface.withValues(alpha: isHidden ? 0.34 : 0.24),
             size: 20,
           ),
         ),
@@ -4048,14 +3864,14 @@ class _ContactStatusSection extends StatelessWidget {
                 status.label,
                 style: Theme.of(
                   context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(width: 8),
               Text(
                 '${contacts.length}',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF6A6F68),
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(color: appTextSecondary),
               ),
             ],
           ),
@@ -4196,7 +4012,7 @@ class _ContactTileState extends State<_ContactTile> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: _SwipeActionButton(
-                  color: const Color(0xFF2F5D50),
+                  color: appBrand,
                   icon: Icons.add,
                   label: 'Klient',
                   onPressed: () => _confirmAddToClients(context),
@@ -4211,14 +4027,14 @@ class _ContactTileState extends State<_ContactTile> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     _SwipeActionButton(
-                      color: const Color(0xFFF0A202),
+                      color: appWarning,
                       icon: Icons.archive_outlined,
                       label: 'Archiwum',
                       onPressed: () => _confirmArchive(context),
                     ),
                     const SizedBox(width: 6),
                     _SwipeActionButton(
-                      color: const Color(0xFFD64545),
+                      color: appDanger,
                       icon: Icons.close,
                       label: 'Usuń',
                       onPressed: () => _confirmDelete(context),
@@ -4232,15 +4048,11 @@ class _ContactTileState extends State<_ContactTile> {
               curve: Curves.easeOutCubic,
               transform: Matrix4.translationValues(_dragOffset, 0, 0),
               child: Material(
-                color: widget.isSelected
-                    ? const Color(0xFFEAF2EF)
-                    : Colors.white,
+                color: widget.isSelected ? appBrandSoft : appSurface,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                   side: BorderSide(
-                    color: widget.isSelected
-                        ? const Color(0xFF2F5D50)
-                        : const Color(0xFFD8D4CA),
+                    color: widget.isSelected ? appBrand : appBorderStrong,
                     width: widget.isSelected ? 2 : 1,
                   ),
                 ),
@@ -4265,7 +4077,7 @@ class _ContactTileState extends State<_ContactTile> {
                             widget.isSelected
                                 ? Icons.check_circle
                                 : Icons.radio_button_unchecked,
-                            color: const Color(0xFF2F5D50),
+                            color: appBrand,
                           ),
                           const SizedBox(width: 10),
                         ],
@@ -4286,7 +4098,7 @@ class _ContactTileState extends State<_ContactTile> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w800),
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                               if (subtitle.isNotEmpty)
                                 Text(
@@ -4294,7 +4106,7 @@ class _ContactTileState extends State<_ContactTile> {
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    color: Color(0xFF6A6F68),
+                                    color: appTextSecondary,
                                   ),
                                 ),
                             ],
@@ -4305,7 +4117,7 @@ class _ContactTileState extends State<_ContactTile> {
                           const SizedBox(width: 10),
                           IconButton(
                             tooltip: 'Nawiguj',
-                            color: const Color(0xFF2F5D50),
+                            color: appBrand,
                             onPressed: () => _openMap(context, contact.address),
                             iconSize: 25,
                             icon: const Icon(Icons.home),
@@ -4316,7 +4128,7 @@ class _ContactTileState extends State<_ContactTile> {
                           const SizedBox(width: 8),
                           IconButton(
                             tooltip: 'Zadzwoń',
-                            color: const Color(0xFF2F5D50),
+                            color: appBrand,
                             onPressed: () => _callPhone(context, contact.phone),
                             iconSize: 25,
                             icon: const Icon(Icons.phone),
@@ -4339,7 +4151,7 @@ class _ContactTileState extends State<_ContactTile> {
       context: context,
       title: 'Usunąć kontakt na stałe?',
       actionLabel: 'Usuń',
-      actionColor: const Color(0xFFD64545),
+      actionColor: appDanger,
     );
 
     if (confirmed == true) {
@@ -4352,7 +4164,7 @@ class _ContactTileState extends State<_ContactTile> {
       context: context,
       title: 'Przenieść kontakt do archiwum?',
       actionLabel: 'Archiwum',
-      actionColor: const Color(0xFFF0A202),
+      actionColor: appWarning,
     );
 
     if (confirmed == true) {
@@ -4365,7 +4177,7 @@ class _ContactTileState extends State<_ContactTile> {
       context: context,
       title: 'Przenieść kontakt do realizacji?',
       actionLabel: 'Dodaj',
-      actionColor: const Color(0xFF2F5D50),
+      actionColor: appBrand,
     );
 
     if (confirmed == true) {
@@ -4442,16 +4254,16 @@ class _SwipeActionButton extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, color: Colors.white, size: 24),
+              Icon(icon, color: appSurface, size: 24),
               const SizedBox(height: 4),
               Text(
                 label,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  color: Colors.white,
+                  color: appSurface,
                   fontSize: 11,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ],
@@ -4815,9 +4627,9 @@ class _DetailRow extends StatelessWidget {
           Text(
             label,
             style: const TextStyle(
-              color: Color(0xFF6A6F68),
+              color: appTextSecondary,
               fontSize: 12,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w500,
             ),
           ),
           const SizedBox(height: 4),
@@ -4994,7 +4806,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       value: contacts.length.toString(),
                       subtitle: 'Aktywne kontakty',
                       icon: Icons.groups,
-                      color: const Color(0xFF2F5D50),
+                      color: appBrand,
                     ),
                     _StatsTileData(
                       id: 'clients',
@@ -5002,7 +4814,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       value: clients.length.toString(),
                       subtitle: 'Aktywne sprawy',
                       icon: Icons.precision_manufacturing,
-                      color: const Color(0xFF2563A9),
+                      color: appInfo,
                     ),
                     _StatsTileData(
                       id: 'signed_clients',
@@ -5020,7 +4832,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       ),
                       subtitle: 'Łącznie',
                       icon: Icons.timer_outlined,
-                      color: const Color(0xFF6D6A75),
+                      color: appMuted,
                     ),
                     _StatsTileData(
                       id: 'lead_sessions',
@@ -5028,7 +4840,7 @@ class _StatisticsPageState extends State<StatisticsPage> {
                       value: leadSessions.length.toString(),
                       subtitle: 'Ile razy agent leadował',
                       icon: Icons.route_outlined,
-                      color: const Color(0xFFA8473B),
+                      color: appDanger,
                     ),
                   ],
                 ),
@@ -5086,7 +4898,7 @@ class _StatsTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
-        color: Colors.white,
+        color: appSurface,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
@@ -5095,10 +4907,10 @@ class _StatsTile extends StatelessWidget {
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE2DED4)),
+              border: Border.all(color: appBorder),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.04),
+                  color: appTextPrimary.withValues(alpha: 0.04),
                   blurRadius: 12,
                   offset: const Offset(0, 6),
                 ),
@@ -5115,7 +4927,7 @@ class _StatsTile extends StatelessWidget {
                       child: Text(
                         tile.title,
                         style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                     ),
                   ],
@@ -5124,7 +4936,7 @@ class _StatsTile extends StatelessWidget {
                 Text(
                   tile.value,
                   style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w800,
                     height: 1,
                   ),
                 ),
@@ -5132,7 +4944,7 @@ class _StatsTile extends StatelessWidget {
                 Text(
                   tile.subtitle,
                   style: const TextStyle(
-                    color: Color(0xFF6A6F68),
+                    color: appTextSecondary,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -5162,7 +4974,7 @@ class _StatsRangeSelector extends StatelessWidget {
           Expanded(
             child: TextButton(
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFF172019),
+                foregroundColor: appTextPrimary,
                 padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
@@ -5174,7 +4986,7 @@ class _StatsRangeSelector extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: currentRange == range.value
-                      ? FontWeight.w900
+                      ? FontWeight.w700
                       : FontWeight.w500,
                 ),
               ),
@@ -5283,7 +5095,7 @@ class _AccountPageState extends State<AccountPage> {
                 'Zdjęcie profilowe',
                 style: Theme.of(
                   context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
               ),
               const SizedBox(height: 14),
               OutlinedButton.icon(
@@ -5690,9 +5502,9 @@ class _AccountHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFFAF9F5),
+        color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE4E0D7)),
+        border: Border.all(color: appBorder),
       ),
       child: Row(
         children: [
@@ -5704,14 +5516,14 @@ class _AccountHeader extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 28,
-                  backgroundColor: const Color(0xFFE7EFE8),
-                  foregroundColor: const Color(0xFF2F5D50),
+                  backgroundColor: appBrandSoft,
+                  foregroundColor: appBrand,
                   child: avatarPath == null || avatarPath!.isEmpty
                       ? Text(
                           initials,
                           style: const TextStyle(
                             fontSize: 18,
-                            fontWeight: FontWeight.w900,
+                            fontWeight: FontWeight.w700,
                           ),
                         )
                       : ClipOval(child: _AvatarImage(path: avatarPath!)),
@@ -5720,12 +5532,12 @@ class _AccountHeader extends StatelessWidget {
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.18),
+                    color: appTextPrimary.withValues(alpha: 0.18),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
                     Icons.photo_camera_outlined,
-                    color: Colors.white,
+                    color: appSurface,
                     size: 22,
                   ),
                 ),
@@ -5742,7 +5554,7 @@ class _AccountHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -5751,8 +5563,8 @@ class _AccountHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: Color(0xFF6A6F68),
-                    fontWeight: FontWeight.w700,
+                    color: appTextSecondary,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
@@ -5782,7 +5594,7 @@ class _SettingsCategoryTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
-        color: Colors.white,
+        color: appSurface,
         borderRadius: BorderRadius.circular(8),
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
@@ -5791,7 +5603,7 @@ class _SettingsCategoryTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFE4E0D7)),
+              border: Border.all(color: appBorder),
             ),
             child: Row(
               children: [
@@ -5799,10 +5611,10 @@ class _SettingsCategoryTile extends StatelessWidget {
                   width: 40,
                   height: 40,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE7EFE8),
+                    color: appBrandSoft,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(icon, color: const Color(0xFF2F5D50), size: 22),
+                  child: Icon(icon, color: appBrand, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -5814,9 +5626,9 @@ class _SettingsCategoryTile extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Color(0xFF172019),
+                          color: appTextPrimary,
                           fontSize: 15,
-                          fontWeight: FontWeight.w900,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
                       const SizedBox(height: 3),
@@ -5825,9 +5637,9 @@ class _SettingsCategoryTile extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Color(0xFF6A6F68),
+                          color: appTextSecondary,
                           fontSize: 12,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w500,
                           height: 1.15,
                         ),
                       ),
@@ -5835,7 +5647,7 @@ class _SettingsCategoryTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Icon(Icons.chevron_right, color: Color(0xFF6A6F68)),
+                const Icon(Icons.chevron_right, color: appTextSecondary),
               ],
             ),
           ),
@@ -5859,7 +5671,7 @@ class _SettingsDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F4ED),
+      backgroundColor: appBackground,
       appBar: AppBar(
         centerTitle: false,
         leading: IconButton(
@@ -5869,21 +5681,21 @@ class _SettingsDetailPage extends StatelessWidget {
         ),
         title: Row(
           children: [
-            Icon(icon, color: const Color(0xFF2F5D50), size: 22),
+            Icon(icon, color: appBrand, size: 22),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w900),
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
           ],
         ),
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: Color(0xFFE4E0D7)),
+          child: Divider(height: 1, thickness: 1, color: appBorder),
         ),
       ),
       body: _PageShell(
@@ -5892,16 +5704,16 @@ class _SettingsDetailPage extends StatelessWidget {
           children: [
             Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: appSurface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFE4E0D7)),
+                border: Border.all(color: appBorder),
               ),
               child: Column(
                 children: [
                   for (var index = 0; index < children.length; index++) ...[
                     children[index],
                     if (index != children.length - 1)
-                      const Divider(height: 1, color: Color(0xFFEDE9DF)),
+                      const Divider(height: 1, color: appBorder),
                   ],
                 ],
               ),
@@ -5958,14 +5770,14 @@ class _OnboardingPreviewDialogState extends State<_OnboardingPreviewDialog> {
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: Material(
-            color: const Color(0xFFF7F4ED),
+            color: appBackground,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.fromLTRB(18, 16, 12, 16),
-                  color: const Color(0xFF172019),
+                  color: appTextPrimary,
                   child: Row(
                     children: [
                       Expanded(
@@ -5975,9 +5787,9 @@ class _OnboardingPreviewDialogState extends State<_OnboardingPreviewDialog> {
                             const Text(
                               'Pierwsza konfiguracja',
                               style: TextStyle(
-                                color: Color(0xFFB9F6CA),
+                                color: appBrandSoft,
                                 fontSize: 12,
-                                fontWeight: FontWeight.w900,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
                             const SizedBox(height: 4),
@@ -5987,9 +5799,9 @@ class _OnboardingPreviewDialogState extends State<_OnboardingPreviewDialog> {
                                 _titles[_step],
                                 key: ValueKey(_step),
                                 style: const TextStyle(
-                                  color: Colors.white,
+                                  color: appSurface,
                                   fontSize: 22,
-                                  fontWeight: FontWeight.w900,
+                                  fontWeight: FontWeight.w700,
                                 ),
                               ),
                             ),
@@ -5999,7 +5811,7 @@ class _OnboardingPreviewDialogState extends State<_OnboardingPreviewDialog> {
                       IconButton(
                         tooltip: 'Zamknij',
                         onPressed: () => Navigator.of(context).pop(),
-                        icon: const Icon(Icons.close, color: Colors.white),
+                        icon: const Icon(Icons.close, color: appSurface),
                       ),
                     ],
                   ),
@@ -6088,9 +5900,7 @@ class _OnboardingProgress extends StatelessWidget {
               duration: const Duration(milliseconds: 220),
               height: 5,
               decoration: BoxDecoration(
-                color: index <= step
-                    ? const Color(0xFF54D376)
-                    : const Color(0xFFE4E0D7),
+                color: index <= step ? appSuccess : appBorder,
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -6138,9 +5948,9 @@ class _OnboardingStepContent extends StatelessWidget {
             const Text(
               'Jaki cel ma podpowiadać Dashboard przed startem leadowania?',
               style: TextStyle(
-                color: Color(0xFF172019),
+                color: appTextPrimary,
                 fontSize: 18,
-                fontWeight: FontWeight.w900,
+                fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 14),
@@ -6187,9 +5997,9 @@ class _OnboardingChoiceGrid extends StatelessWidget {
         Text(
           title,
           style: const TextStyle(
-            color: Color(0xFF172019),
+            color: appTextPrimary,
             fontSize: 18,
-            fontWeight: FontWeight.w900,
+            fontWeight: FontWeight.w700,
           ),
         ),
         const SizedBox(height: 14),
@@ -6208,18 +6018,16 @@ class _OnboardingChoiceGrid extends StatelessWidget {
             return Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: appSurface,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: index == 0
-                      ? const Color(0xFF54D376)
-                      : const Color(0xFFE4E0D7),
+                  color: index == 0 ? appSuccess : appBorder,
                   width: index == 0 ? 2 : 1,
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(choice.icon, color: const Color(0xFF2F5D50), size: 22),
+                  Icon(choice.icon, color: appBrand, size: 22),
                   const SizedBox(width: 9),
                   Expanded(
                     child: Text(
@@ -6227,8 +6035,8 @@ class _OnboardingChoiceGrid extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Color(0xFF172019),
-                        fontWeight: FontWeight.w900,
+                        color: appTextPrimary,
+                        fontWeight: FontWeight.w700,
                         height: 1.05,
                       ),
                     ),
@@ -6255,9 +6063,9 @@ class _GoalPreviewTile extends StatelessWidget {
       height: 82,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: appSurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE4E0D7)),
+        border: Border.all(color: appBorder),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -6265,9 +6073,9 @@ class _GoalPreviewTile extends StatelessWidget {
           Text(
             value,
             style: const TextStyle(
-              color: Color(0xFF172019),
+              color: appTextPrimary,
               fontSize: 24,
-              fontWeight: FontWeight.w900,
+              fontWeight: FontWeight.w700,
             ),
           ),
           const SizedBox(height: 4),
@@ -6276,9 +6084,9 @@ class _GoalPreviewTile extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
-              color: Color(0xFF6A6F68),
+              color: appTextSecondary,
               fontSize: 11,
-              fontWeight: FontWeight.w800,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -6309,9 +6117,9 @@ class _SettingsRow extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         textAlign: TextAlign.right,
         style: const TextStyle(
-          color: Color(0xFF6A6F68),
+          color: appTextSecondary,
           fontSize: 12,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w500,
         ),
       ),
     );
@@ -6363,7 +6171,7 @@ class _SettingsSwitchState extends State<_SettingsSwitch> {
           setState(() => _value = value);
           widget.onChanged(value);
         },
-        activeThumbColor: const Color(0xFF2F5D50),
+        activeThumbColor: appBrand,
       ),
     );
   }
@@ -6384,9 +6192,7 @@ class _SettingsAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = destructive
-        ? const Color(0xFFD64545)
-        : const Color(0xFF172019);
+    final color = destructive ? appDanger : appTextPrimary;
     return InkWell(
       onTap: onTap,
       child: _SettingsBaseRow(
@@ -6404,7 +6210,7 @@ class _SettingsBaseRow extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.trailing,
-    this.color = const Color(0xFF172019),
+    this.color = appTextPrimary,
   });
 
   final IconData icon;
@@ -6427,7 +6233,7 @@ class _SettingsBaseRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: color,
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
                 height: 1.15,
               ),
             ),
@@ -6474,21 +6280,21 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 44, color: const Color(0xFF6A6F68)),
+            Icon(icon, size: 44, color: appTextSecondary),
             const SizedBox(height: 12),
             Text(
               text,
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
             ),
             if (detail != null) ...[
               const SizedBox(height: 8),
               Text(
                 detail!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFF6A6F68)),
+                style: const TextStyle(color: appTextSecondary),
               ),
             ],
           ],
@@ -6556,10 +6362,16 @@ class _AddContactSheetState extends State<AddContactSheet> {
 
     setState(() => _isSaving = true);
     try {
+      final phone = _phoneController.text.trim();
+      if (phone.isNotEmpty && await _contactPhoneExists(user.id, phone)) {
+        _showError('Kontakt z tym numerem telefonu juz istnieje.');
+        return;
+      }
+
       final payload = <String, dynamic>{
         'agent_id': user.id,
         'contact_name': _nameController.text.trim(),
-        'phone': _phoneController.text.trim(),
+        'phone': phone,
         'address': _addressController.text.trim(),
         'status': _status,
         'note': _noteController.text.trim(),
@@ -6594,6 +6406,23 @@ class _AddContactSheetState extends State<AddContactSheet> {
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  Future<bool> _contactPhoneExists(String agentId, String phone) async {
+    final normalizedPhone = _normalizePhone(phone);
+    final data = await _supabase
+        .from('contacts')
+        .select('id, phone')
+        .eq('agent_id', agentId)
+        .isFilter('archived_at', null)
+        .isFilter('moved_to_client_at', null);
+
+    return (data as List).any((item) {
+      final existingPhone = Map<String, dynamic>.from(
+        item,
+      )['phone']?.toString();
+      return _normalizePhone(existingPhone ?? '') == normalizedPhone;
+    });
   }
 
   void _showError(String message) {

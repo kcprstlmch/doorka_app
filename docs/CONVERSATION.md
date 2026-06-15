@@ -1,293 +1,177 @@
-# Plan współpracy
+# CONVERSATION
 
-Ten plik służy do rozmów o kolejności pracy, obowiązkach, decyzjach i podziale zadań między użytkownika a Codex.
+Ten plik jest roboczym miejscem do prowadzenia projektu.
+Ma byc aktualizowany na biezaco po decyzjach, pytaniach i zmianach w aplikacji.
 
-## Zasada pracy
-Budujemy aplikację etapami.
-Każdy etap powinien mieć:
-- cel,
-- konkretne zadania,
-- decyzje po stronie użytkownika,
-- rzeczy, które może wykonać Codex,
-- wynik końcowy.
+## Zasady pracy
 
-Pliki `.md` w folderze `/docs` są podstawą rozmowy i implementacji.
-Jeśli w trakcie pracy pojawi się konflikt między starym projektem `/crm` a dokumentacją, najpierw opieramy się na `/docs`, a konflikt zapisujemy do pytań lub decyzji.
+- Uzytkownik robi commity samodzielnie.
+- Codex nie tworzy commitow i nie przygotowuje zmian do commita bez wyraznego polecenia.
+- Dokumentacja w `/docs` jest zrodlem prawdy projektu.
+- Jesli decyzja jest niepewna albo temat wraca pozniej, zapisujemy go w sekcji "Pozniej".
+- Supabase ma teraz status "pit stop" i nie ruszamy zmian struktury bazy bez osobnej rozmowy.
+- Ikony aplikacji zostaja na pozniejszy etap.
 
-## Etap 1: Supabase schema + RLS
+## Aktualny priorytet
 
-### Cel
-Sprawdzić i uporządkować fundament danych istniejącej aplikacji.
-Supabase ma być głównym źródłem prawdy dla kontaktów, klientów, statusów, aktywności, dokumentów i statystyk.
-Każdy agent widzi tylko swoje dane.
-Na stronie doorka.pl działa już aplikacja Doorka, a projekt Supabase istnieje pod nazwą "CRM - agent sprzedazowy".
+Pierwszy priorytet to porzadek techniczny aplikacji i budowanie funkcji krok po kroku.
+Na tym etapie nie probujemy zrobic wszystkiego naraz.
 
-### Know-how
-Najpierw trzeba zrobić audyt istniejącego projektu Supabase, zanim zaczniemy tworzyć nowe tabele, migracje albo zmiany.
-Nie projektujemy bazy w ciemno od zera, jeśli istnieją już tabele, dane i działająca aplikacja.
-Każda tabela z danymi agenta powinna mieć `agent_id`.
-RLS musi pilnować, żeby agent mógł czytać i edytować tylko swoje rekordy.
-Tabele powinny odzwierciedlać decyzje z `DATA_MODEL.md`.
+Najblizsze prace:
 
-### Zadania Codex
-- Sprawdzić obecny schemat Supabase, jeśli użytkownik udostępni dostęp albo eksport struktury.
-- Porównać istniejące tabele z `DATA_MODEL.md`.
-- Wskazać braki, konflikty i ryzyka.
-- Zaproponować zmiany w tabelach, indeksach i relacjach.
-- Zaproponować lub poprawić polityki RLS.
-- Przygotować SQL zmian dopiero po audycie istniejącej struktury.
-- Nie tworzyć lokalnych migracji w ciemno bez potwierdzenia.
-- Pilnować zgodności z dokumentami w `/docs`.
+1. Porzadkowac kod aplikacji.
+2. Wydzielac duze sekcje z `main.dart` do osobnych plikow.
+3. Dopinac Dashboard jako glowne miejsce informacji o pracy agenta.
+4. Zapisywac decyzje produktowe w dokumentacji.
+5. Nie ruszac Supabase, dopoki nie wrocimy do rozmowy o tabelach.
 
-### Zadania użytkownika
-- Udostępnić sposób dostępu do istniejącego projektu Supabase "CRM - agent sprzedazowy" albo eksport schematu.
-- Potwierdzić, czy Codex ma pracować przez panel Supabase, SQL Editor, MCP/narzędzie, connection string, czy tylko na podstawie eksportu.
-- Nie podawać publicznie sekretów w dokumentacji.
-- Potwierdzić każdą zmianę struktury bazy przed wykonaniem na działającej aplikacji.
-- Przed czyszczeniem danych wskazać, które dane i konta są do zachowania, a które można usunąć.
+## Porzadek techniczny kodu
 
-### Wynik końcowy
-Zweryfikowany istniejący schemat Supabase, lista braków względem docelowej aplikacji i bezpieczny plan zmian bez ryzyka popsucia działającej aplikacji.
+### Co juz zrobiono
 
-### Aktualizacja po odnalezieniu folderu `/crm`
-Lokalny folder istniejącej aplikacji webowej znajduje się w `/Users/kacstelmach/crm`.
-W projekcie wykryto działającą aplikację Next.js z Supabase.
-Do Fluttera przeniesiono assety marki:
-- `assets/images/d2d-door-ka-logo.png`
-- `assets/images/app-sidebar-logo.png`
+- Wydzielono wyglad aplikacji do `lib/app_design.dart`.
+- Wydzielono modele danych do `lib/app_models.dart`.
+- Dodano font Inter przez `google_fonts`.
+- Ujednolicono czesc kolorow i wag tekstu w aplikacji.
+- `main.dart` nadal jest duzy, ale pierwszy poziom porzadku jest wykonany.
 
-Powstał plik `EXISTING_CRM_AUDIT.md`, który opisuje, co z istniejącego projektu traktujemy jako techniczną referencję.
-Najważniejszy wniosek: nie przepisujemy aplikacji webowej 1:1.
-Flutter ma korzystać z istniejącej wiedzy i Supabase, ale działać zgodnie z dokumentacją `/docs`.
+### Co robimy dalej
 
-#### Zadania Codex po audycie `/crm`
-- Sprawdzić, czy tabela `crm_leads` może być docelowo tabelą Moi Klienci.
-- Sprawdzić polityki RLS dla `contacts`, `activities`, `crm_leads` i storage `crm-client-files`.
-- Przygotować mapowanie starych statusów webowej aplikacji na statusy z aktualnej dokumentacji.
-- Przygotować bezpieczną konfigurację Supabase dla Fluttera bez wpisywania sekretów w kod.
-- Zacząć od logowania i podstawowego szkieletu aplikacji mobilnej.
+Docelowo chcemy wydzielic sekcje aplikacji do osobnych plikow:
 
-#### Zadania użytkownika po audycie `/crm`
-- W osobnym wątku omówić docelowy porządek tabel Supabase, w tym `crm_leads` i strukturę Moi Klienci.
-- Przy przeglądzie danych wskazać rekordy niewyrzucalne oraz dane testowe do usunięcia.
+- Dashboard
+- Kontakty
+- W realizacji
+- Statystyka
+- Konto / ustawienia
+- Wspolne komponenty UI
+- Pomocnicze funkcje dat, telefonu, map i formatowania
 
-#### Ustalenia
-- Flutter ma od początku korzystać z tej samej produkcyjnej bazy Supabase co doorka.pl.
-- Baza doorka.pl ma zostać zaktualizowana do statusów i danych zapisanych w dokumentacji `/docs`.
-- Temat tabel Supabase, szczególnie `crm_leads`, został wydzielony do osobnego wątku.
-- W bazie są dane niewyrzucalne oraz dane testowe, w tym prawdopodobnie większość agentów poza właścicielem, które będą do usunięcia po przeglądzie.
+To jest dobra praktyka, bo aplikacja bedzie latwiejsza do utrzymania.
+Nie robimy jednak agresywnego refaktoru bez potrzeby.
+Kazde wydzielenie powinno byc bezpieczne i sprawdzone przez `flutter analyze` oraz testy.
 
-## Etap 2: Logowanie i rejestracja
+## Dashboard
 
-### Cel
-Agent może założyć konto, potwierdzić e-mail, zalogować się, pozostać zalogowanym oraz zresetować hasło.
+Dashboard ma pokazywac rzeczy, dla ktorych aplikacja realnie powstaje.
 
-### Know-how
-Logowanie powinno bazować na Supabase Auth.
-Podstawowa rejestracja to e-mail i hasło.
-Google Authentication ma być docelowo wspierane, ale konfigurację odkładamy na późniejszy etap.
-Reset hasła dotyczy tylko kont e-mail/hasło.
-Konto Google nie potrzebuje osobnego resetu hasła w aplikacji.
+### Trzy glowne skladowe aplikacji
 
-### Zadania Codex
-- Dodać zależności Flutter/Supabase.
-- Skonfigurować klienta Supabase w aplikacji.
-- Zbudować ekrany: logowanie, rejestracja, reset hasła.
-- Dodać obsługę sesji użytkownika.
-- Dodać komunikaty błędów i stanów ładowania.
-- Przygotować logikę rozpoznawania zalogowanego agenta.
+Na dole Dashboardu ma byc kafelek porownawczy z trzema najwazniejszymi metrykami:
 
-### Zadania użytkownika
-- Potwierdzić dane projektu Supabase.
-- Skonfigurować Google Authentication w Supabase/Google Cloud dopiero wtedy, gdy wrócimy do tego tematu.
-- Przygotować lub potwierdzić teksty ekranów logowania/rejestracji.
-- Potwierdzić, czy onboarding po rejestracji omawiamy przed wdrożeniem logowania, czy później.
+- ilosc umow przeprocesowanych,
+- ilosc spotkan umowionych,
+- ilosc czasu w terenie w formacie godziny, minuty i sekundy.
 
-### Wynik końcowy
-Agent może bezpiecznie wejść do aplikacji i pracować na danych przypisanych do swojego konta.
+Domyslny okres porownania to tydzien.
+Okres bedzie mozna pozniej wybrac w ustawieniach, ale na start przyjmujemy tydzien jako domyslny.
 
-## Etap 3: Kontakty
+### Aktualne zalozenie
 
-### Cel
-Zbudować podstawowy moduł kontaktów, czyli core aplikacji.
+Kafelek "W tym tygodniu" na Dashboardzie ma byc oparty o:
 
-### Know-how
-Kontakt jest głównym obiektem pracy agenta przed przeniesieniem do Moi Klienci.
-Lista kontaktów ma być grupowana po statusach.
-Status jest kluczową informacją kontaktu.
-Zmiana statusu wymaga zatwierdzenia i zapisuje się w aktywności.
-Archiwum kontaktów pozwala ukryć kontakt z aktywnej listy i później go przywrócić.
+- umowy / realizacje dodane w danym tygodniu,
+- kontakty ze statusem `Umowione spotkanie` w danym tygodniu,
+- sesje leadowania i ich `work_seconds`.
 
-### Zadania Codex
-- Zbudować model kontaktu w Flutterze.
-- Zbudować ekran listy kontaktów grupowanej po statusach.
-- Zbudować formularz dodawania kontaktu.
-- Obsłużyć statusy: Umówione spotkanie, Zainteresowany, Szybki kontakt, Do podjechania, Do przedzwonienia, Niezainteresowany, Brak kontaktu.
-- Dodać logikę pól zależnych od statusu.
-- Dodać szczegóły kontaktu.
-- Dodać zmianę statusu z potwierdzeniem.
-- Dodać aktywność statusów.
-- Dodać archiwum kontaktów i przywracanie.
-- Dodać przycisk dzwonienia i otwarcia mapy z adresu.
+### Do pozniejszego dopracowania
 
-### Zadania użytkownika
-- Doprecyzować wygląd kafelka kontaktu: jakie dane mają być widoczne na liście.
-- Potwierdzić, czy numer telefonu jest widoczny tekstowo, czy tylko jako przycisk.
-- Doprecyzować termin dla Do podjechania: kafelki, kalendarz albo oba.
-- Doprecyzować znaczenie jakości S/M/L/XL.
-- Potwierdzić, czy produkt przy Umówione spotkanie ma być także osobnym polem technicznym.
+- Dokladne znaczenie "umowa przeprocesowana".
+- Czy liczymy tylko nowe realizacje, czy takze realizacje przesuniete etapami.
+- Czy porownanie ma byc tydzien do tygodnia, miesiac do miesiaca albo zalezne od ustawien uzytkownika.
+- Czy kafelek ma miec osobny widok szczegolowy po kliknieciu.
 
-### Wynik końcowy
-Agent może dodawać, przeglądać, filtrować, archiwizować i aktualizować kontakty.
+## Kontakty
 
-## Etap 4: Moi Klienci
+### Decyzje
 
-### Cel
-Zbudować osobną sekcję i osobną tabelę klientów.
+- Jeden agent nie moze miec dwoch kontaktow z tym samym numerem telefonu.
+- Jesli agent probuje dodac kontakt z numerem, ktory juz istnieje u tego samego agenta, aplikacja ma pokazac komunikat i zablokowac dodanie kontaktu.
+- Archiwum kontaktow ma byc dostepne w ustawieniach konta jako zakladka "Archiwum kontaktow".
 
-### Know-how
-Moi Klienci nie są tylko filtrem kontaktów.
-Klient powstaje po kliknięciu Dodaj do Moi Klienci.
-Dodanie do Moi Klienci odbywa się przez przesunięcie kontaktu w prawo.
-Status realizacji klienta zmienia kolor nagłówka albo całej sekcji klienta.
-Status Spad oznacza klienta, który po dodaniu do Moi Klienci rezygnuje.
+### Do pozniejszego dopracowania
 
-### Zadania Codex
-- Zbudować tabelę i model klienta.
-- Zbudować przeniesienie kontaktu do Moi Klienci.
-- Zbudować listę Moi Klienci.
-- Zbudować szczegóły klienta.
-- Dodać statusy realizacji klientów.
-- Dodać status Spad i przycisk Przenieś do archiwum.
-- Dodać sekcje: dane klienta, umowa, płatność, dokumenty, status realizacji.
-- Dodać archiwum klientów.
-- Dodać synchronizację wspólnych pól kontaktu i klienta.
+- Jak dokladnie odroznic "Szybki kontakt" od "Umowione spotkanie".
+- Jak maja dzialac przypomnienia: po co, kiedy, dla kogo i w jakiej formie.
+- Jak ma wygladac archiwum kontaktow i przywracanie kontaktu.
 
-### Zadania użytkownika
-- Doprecyzować finalny wygląd kafelka klienta.
-- Doprecyzować, czy kolor statusu ma być tłem, paskiem, nagłówkiem czy całą sekcją.
-- Doprecyzować model wielu produktów jednego klienta.
-- Potwierdzić, czy dokumenty trzymamy w Supabase Storage.
-- Potwierdzić realny limit plików i kompresję zdjęć.
-- Doprecyzować, jak klient wraca do kontaktów, jeśli się rozmyśli.
+## W realizacji
 
-### Wynik końcowy
-Agent może zarządzać klientami po podpisaniu umowy, monitorować realizację i archiwizować klientów.
+### Decyzje
 
-## Etap 5: Statystyki
+- "W realizacji" zostaje nazwa sekcji po klientach z podpisana umowa.
+- Sekcja nie jest zwykla lista klientow, tylko miejscem sledzenia procesu realizacji.
+- Szczegolowy kafelek realizacji jest waznym etapem, ale bedzie dopracowywany pozniej.
 
-### Cel
-Zbudować automatyczne statystyki pracy agenta.
+### Do pozniejszego dopracowania
 
-### Know-how
-Statystyki nie są wpisywane ręcznie.
-Są wyliczane z danych w Supabase.
-Najważniejsze dane na start to: umówione spotkania, spisane umowy, klienci dodani do Moi Klienci i spady.
-Spad liczymy jako konwersję: `(spisana umowa -> Moi Klienci) / status Spad`, pokazane procentowo.
-Tydzień zaczyna się w poniedziałek.
-Na tym etapie ważniejszy jest sposób wyświetlania statystyk niż finalny zestaw metryk.
-Statystyki mają być pokazane jako kafelki, które użytkownik może przestawiać.
-Nad kafelkami ma być filtr zakresu danych: łącznie, rok, miesiąc, tydzień i dzień.
-Kliknięcie kafelka prowadzi do prostych szczegółów danej statystyki.
-### Zadania Codex
-- Przygotować zapytania/statystyki z Supabase.
-- Zbudować model wyliczeń statystyk.
-- Zbudować ekran Statystyka.
-- Dodać zakresy: łącznie, rok, miesiąc, tydzień i dzień.
-- Dodać przestawialne kafelki statystyk.
-- Dodać szczegóły po kliknięciu kafelka.
-- Dodać porównania okresów, jeśli zostaną potwierdzone.
-- Dodać statystykę spadów.
+- Szczegolowy widok realizacji.
+- Historia zmian etapow.
+- Dokladne daty przejscia przez etap.
+- Czy "umowa przeprocesowana" na Dashboardzie ma byc liczona z tej sekcji.
 
-### Zadania użytkownika
-- Doprecyzować, czy statystyki mają pokazywać kilka rodzajów konwersji.
-- Doprecyzować, czy spad obniża skuteczność agenta.
-- Doprecyzować, czy statystyki mają liczyć kontakty zarchiwizowane.
-- Doprecyzować zakresy czasu widoczne w aplikacji.
+## Statystyka
 
-### Wynik końcowy
-Agent widzi mierzalny wynik swojej pracy bez ręcznego liczenia.
+### Aktualne zalozenie
 
-## Etap 6: Dashboard
+Statystyka ma wspierac Dashboard, ale nie musi od razu miec wszystkich zaawansowanych danych.
+Najwazniejsze metryki na start:
 
-### Cel
-Zbudować stronę główną aplikacji.
+- spotkania umowione,
+- umowy / realizacje,
+- czas leadowania,
+- liczba sesji leadowania.
 
-### Know-how
-Dashboard powinien pokazywać najważniejsze informacje z istniejących danych.
-Nie powinien być projektowany przed kontaktem, klientem i statystykami, bo inaczej będzie tylko pustą makietą.
-Aktywny kafelek i UX Dashboardu są jeszcze tematem do późniejszej rozmowy.
+### Do pozniejszego dopracowania
 
-### Zadania Codex
-- Zbudować ekran Dashboard po powstaniu kontaktów, klientów i statystyk.
-- Pokazać dzisiejsze i najbliższe kontakty do zadzwonienia/podjechania.
-- Pokazać najważniejsze statystyki.
-- Dodać możliwość zmiany godziny spotkania bezpośrednio z Dashboardu.
-- Dodać puste stany.
+- Konwersje.
+- Spady.
+- Jak liczyc skutecznosc agenta.
+- Szczegoly statystyk po kliknieciu kafelka.
 
-### Zadania użytkownika
-- Omówić UX Dashboardu na podstawie inspiracji.
-- Doprecyzować aktywny kafelek.
-- Doprecyzować, co agent ma zobaczyć jako pierwsze po otwarciu aplikacji.
-- Doprecyzować cytaty/komunikaty motywacyjne.
+## Konto i ustawienia
 
-### Wynik końcowy
-Agent po wejściu do aplikacji widzi, co ma dzisiaj zrobić i jak idą jego wyniki.
+### Decyzje
 
-## Etap 7: Sesja leadowania
+- Ustawienia sa osobnym ekranem kategorii.
+- Nie pokazujemy wszystkich opcji naraz na glownym ekranie ustawien.
+- Archiwum kontaktow ma byc jedna z sekcji w ustawieniach.
 
-### Cel
-Zbudować funkcję Rozpocznij leadowanie.
+### Do pozniejszego dopracowania
 
-### Know-how
-Rozpocznij leadowanie uruchamia licznik czasu.
-Agent może pauzować sesję.
-Cel sesji obejmuje liczbę umówionych spotkań i liczbę zebranych kontaktów.
-Zamknij dzień pojawia się wtedy, gdy agent zrealizuje cel danego spotkania/sesji leadowania.
+- Zapisywanie preferencji uzytkownika.
+- Domyslny zakres porownania Dashboardu.
+- Powiadomienia.
+- Onboarding.
+- Zdjecie profilowe w Supabase Storage.
+- Zmiana hasla, wylogowanie i usuniecie konta jako pelny proces.
 
-### Zadania Codex
-- Zbudować licznik sesji leadowania.
-- Dodać pauzę.
-- Dodać mechanizm celu sesji.
-- Liczyć kontakty i umówione spotkania w trakcie sesji, jeśli zostanie potwierdzone.
-- Dodać podsumowanie sesji.
-- Przygotować logikę Zamknij dzień.
+## Supabase
 
-### Zadania użytkownika
-- Doprecyzować ekran ustawiania celu.
-- Doprecyzować, czy cel może być domyślny.
-- Doprecyzować, czy agent może zakończyć sesję bez osiągnięcia celu.
-- Doprecyzować podsumowanie dnia.
+Status: pit stop.
 
-### Wynik końcowy
-Agent może mierzyć realny czas leadowania i wynik sesji.
+Nie wykonujemy teraz zmian w strukturze bazy.
+Do tematu wrocimy osobno, szczegolnie w kontekscie:
 
-## Etap 8: Dokumenty prawne
+- tabel,
+- statusow,
+- czyszczenia starych danych,
+- zgodnosci z dzialajaca aplikacja doorka.pl,
+- danych niewyrzucalnych.
 
-### Cel
-Przygotować regulamin i politykę prywatności przed realnym wypuszczeniem aplikacji.
+## Pozniej
 
-### Know-how
-Te dokumenty nie blokują startu programowania, ale są potrzebne przed testami z prawdziwymi agentami i prawdziwymi danymi klientów.
-Osobne wątki zostały utworzone i zapisane w `LEGAL.md`.
+- Ikony aplikacji dla iOS i Android.
+- Finalny onboarding.
+- Polityka prywatnosci i regulamin.
+- Przypomnienia.
+- Pelne archiwum kontaktow.
+- Pelny widok szczegolowy realizacji.
+- Tryb ciemny / jasny i psychologia wyboru motywu.
 
-### Zadania Codex
-- Zadawać pytania w osobnych wątkach.
-- Na podstawie odpowiedzi przygotować projekt regulaminu.
-- Na podstawie odpowiedzi przygotować projekt polityki prywatności.
-- Dopasować dokumenty do faktycznych funkcji aplikacji.
+## Otwarte pytania
 
-### Zadania użytkownika
-- Odpowiadać na pytania w osobnych wątkach.
-- Podać dane właściciela/usługodawcy.
-- Podać dane kontaktowe.
-- Potwierdzić finalny zakres funkcji przed publikacją.
-- Skonsultować finalne dokumenty prawnie, jeśli aplikacja będzie publicznie udostępniana.
-
-### Wynik końcowy
-Aplikacja ma przygotowane dokumenty prawne wymagane do bezpiecznego testowania i publikacji.
-
-## Rekomendowany pierwszy krok
-Najpierw przygotować Supabase schema + RLS.
-To jest techniczny fundament aplikacji.
-Po zatwierdzeniu schematu można przejść do logowania i kontaktów.
+- Jak dokladnie definiujemy "umowe przeprocesowana"?
+- Czy Dashboard ma porownywac dane zawsze tydzien do tygodnia, czy wedlug ustawienia uzytkownika?
+- Czy szybki kontakt ma miec osobny minimalny formularz, czy korzystac z tego samego procesu dodawania kontaktu?
+- Jakie dane maja byc widoczne w archiwum kontaktow?

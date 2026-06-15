@@ -32,6 +32,7 @@ Sekcja Konto zawiera:
 - Adres e-mail
 - Numer telefonu opcjonalny
 - Branża sprzedażowa
+- Archiwum kontaktów
 - Zmiana hasła
 - Wyloguj
 - Usuń konto
@@ -78,9 +79,11 @@ Sekcja Dashboard zawiera ustawienia włączone / wyłączone:
 - Personalizacja ekranu głównego
 - Wybór widocznych sekcji
 - Kolejność sekcji
+- Domyślny okres porównania wyników
 
 Dashboard powinien mieć domyślny, sensowny układ bez konieczności konfiguracji.
 Personalizacja Dashboardu ma pozwalać użytkownikowi decydować, które sekcje widzi i w jakiej kolejności.
+Domyślny okres porównania wyników na Dashboardzie to tydzień.
 
 ## 6. Raporty
 Sekcja Raporty zawiera:

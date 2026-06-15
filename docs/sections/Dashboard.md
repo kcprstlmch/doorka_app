@@ -127,6 +127,20 @@ Przy liczbach widoczne są małe wartości porównawcze:
 Kafelek "W tym tygodniu" ma przycisk "Rozwiń" / "Zwiń".
 Po zwinięciu zostaje widoczny sam nagłówek kafelka z akcją rozwinięcia.
 
+### Główne metryki Dashboardu
+Najważniejsze metryki Dashboardu na start to:
+- ilość umów przeprocesowanych
+- ilość spotkań umówionych
+- ilość czasu w terenie w formacie godzin, minut i sekund
+
+Te trzy metryki są największymi składowymi aplikacji.
+Kafelek "W tym tygodniu" ma domyślnie pokazywać właśnie te wartości.
+Domyślny zakres porównania to tydzień do poprzedniego tygodnia.
+W przyszłości zakres porównania będzie można zmienić w ustawieniach.
+
+Na obecnym etapie "umowy przeprocesowane" są liczone jako realizacje dodane w danym okresie.
+Dokładna definicja tej metryki wymaga doprecyzowania, ponieważ może docelowo oznaczać także przejście klienta przez konkretne etapy realizacji.
+
 ## Zależność od rytmu dnia
 Docelowo system powinien wiedzieć, czy dany dzień jest dniem:
 - leadowania
