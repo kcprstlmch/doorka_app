@@ -5018,6 +5018,189 @@ class _StatsGrid extends StatelessWidget {
   }
 }
 
+class ArchivedContactsPage extends StatefulWidget {
+  const ArchivedContactsPage({super.key});
+
+  @override
+  State<ArchivedContactsPage> createState() => _ArchivedContactsPageState();
+}
+
+class _ArchivedContactsPageState extends State<ArchivedContactsPage> {
+  late Future<List<Contact>> _contactsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _contactsFuture = _fetchArchivedContacts();
+  }
+
+  Future<List<Contact>> _fetchArchivedContacts() async {
+    final data = await _supabase
+        .from('contacts')
+        .select()
+        .not('archived_at', 'is', null)
+        .isFilter('moved_to_client_at', null);
+
+    return (data as List)
+        .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
+        .toList();
+  }
+
+  void _reload() {
+    setState(() => _contactsFuture = _fetchArchivedContacts());
+  }
+
+  Future<void> _restoreContact(Contact contact) async {
+    await _supabase
+        .from('contacts')
+        .update({'archived_at': null})
+        .eq('id', contact.id);
+    _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: appBackground,
+      appBar: AppBar(
+        centerTitle: false,
+        leading: IconButton(
+          tooltip: 'Wróć',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.archive_outlined, color: appBrand, size: 22),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Archiwum kontaktów',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: appBorder),
+        ),
+      ),
+      body: _PageShell(
+        child: FutureBuilder<List<Contact>>(
+          future: _contactsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            if (snapshot.hasError) {
+              return _EmptyState(
+                icon: Icons.error_outline,
+                text: 'Nie udało się pobrać archiwum.',
+                detail: snapshot.error.toString(),
+              );
+            }
+
+            final contacts = snapshot.data ?? [];
+            if (contacts.isEmpty) {
+              return const _EmptyState(
+                icon: Icons.archive_outlined,
+                text: 'Archiwum jest puste.',
+                detail: 'Zarchiwizowane kontakty pojawią się tutaj.',
+              );
+            }
+
+            return RefreshIndicator(
+              onRefresh: () async => _reload(),
+              child: ListView.separated(
+                padding: const EdgeInsets.only(bottom: 28),
+                itemCount: contacts.length,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 10),
+                itemBuilder: (context, index) {
+                  final contact = contacts[index];
+                  return _ArchivedContactTile(
+                    contact: contact,
+                    onRestore: () => _restoreContact(contact),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _ArchivedContactTile extends StatelessWidget {
+  const _ArchivedContactTile({required this.contact, required this.onRestore});
+
+  final Contact contact;
+  final Future<void> Function() onRestore;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _statusByValue(contact.status);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: appSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: appBorder),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: status.color.withValues(alpha: 0.14),
+            foregroundColor: status.color,
+            child: Text(_initials(contact.contactName)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  contact.contactName.isEmpty
+                      ? 'Bez nazwy'
+                      : contact.contactName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    status.label,
+                    if (contact.phone.isNotEmpty) contact.phone,
+                    if (contact.address.isNotEmpty) contact.address,
+                  ].join(' | '),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: appTextSecondary),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: onRestore,
+            icon: const Icon(Icons.restore_outlined, size: 18),
+            label: const Text('Przywróć'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class AccountPage extends StatefulWidget {
   const AccountPage({super.key});
 
@@ -5045,6 +5228,30 @@ class _AccountPageState extends State<AccountPage> {
       context: context,
       barrierDismissible: true,
       builder: (context) => const _OnboardingPreviewDialog(),
+    );
+  }
+
+  void _openArchivedContacts() {
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return const ArchivedContactsPage();
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curvedAnimation = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curvedAnimation),
+            child: FadeTransition(opacity: curvedAnimation, child: child),
+          );
+        },
+      ),
     );
   }
 
@@ -5176,6 +5383,11 @@ class _AccountPageState extends State<AccountPage> {
                   icon: Icons.solar_power_outlined,
                   label: 'Branża sprzedażowa',
                   value: 'OZE / sprzedaż bezpośrednia',
+                ),
+                _SettingsAction(
+                  icon: Icons.archive_outlined,
+                  label: 'Archiwum kontaktów',
+                  onTap: _openArchivedContacts,
                 ),
                 _SettingsAction(
                   icon: Icons.lock_reset_outlined,

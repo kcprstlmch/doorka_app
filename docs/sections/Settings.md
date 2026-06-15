@@ -42,6 +42,11 @@ Usunięcie konta wymaga potwierdzenia przez e-mail.
 Z perspektywy aplikacji konto znika od razu po usunięciu.
 Technicznie w bazie danych konto może mieć 30 dni karencji, ale agent nie powinien widzieć tej informacji w aplikacji.
 
+### Archiwum kontaktów
+Archiwum kontaktów jest dostępne z kategorii Konto.
+Pokazuje kontakty, które agent przeniósł do archiwum.
+Agent może przywrócić kontakt z archiwum do aktywnej listy kontaktów.
+
 ## 2. Powiadomienia
 Sekcja Powiadomienia zawiera:
 - Opcje powiadomień: w aplikacji, push, e-mail

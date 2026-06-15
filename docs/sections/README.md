@@ -9,6 +9,7 @@ Każdy plik opisuje mechanizmy, funkcje i zachowania jednej sekcji.
 - `In_process.md` - sekcja W realizacji, etapy realizacji, typ klienta, historia etapów i status Spad.
 - `Statistics.md` - statystyki, metryki, zakresy danych, czas leadowania, konwersje i raporty.
 - `Settings.md` - organizacja ustawień, kategorii i preferencji użytkownika.
+- `Planning.md` - planowanie miesiąca, tygodnia i dnia.
 
 ## Zasada pracy
 Jeśli decyzja dotyczy konkretnej sekcji aplikacji, zapisujemy ją w odpowiednim pliku w tym folderze.

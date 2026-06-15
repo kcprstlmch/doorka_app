@@ -64,6 +64,48 @@ Kontakty w sesji leadowania liczą kontakty dodane ze statusami:
 - Do podjechania
 - Do zadzwonienia
 
+## Codzienna realizacja celu
+Najważniejsza potrzeba aplikacji dla agenta to codzienne prowadzenie go przez realizację celu w terenie.
+Planowanie celu może dziać się rzadko, ale agent ma codziennie widzieć, jaki ma cel na dzisiaj i ile jeszcze brakuje.
+
+Przykład:
+- cel dnia: 9 umówionych spotkań
+- obecnie: 4 umówione spotkania
+- brakuje: 5 spotkań
+
+Aktywny kafelek albo inny stale dostępny element Dashboardu powinien pomagać agentowi w pracy na bieżąco.
+Agent nie powinien szukać funkcji w wielu miejscach, gdy jest w terenie.
+
+### Szybkie dopisanie spotkania po zakończeniu dnia
+Jeśli agent zakończył dzień leadowania, ale później odezwie się kontakt z kartki, telefonu albo SMS-a, agent nadal powinien mieć szybki dostęp do dodania spotkania.
+Nie powinien musieć uruchamiać całej sesji leadowania tylko po to, żeby dopisać jedno umówione spotkanie.
+
+Możliwe zachowanie:
+- po zakończeniu sesji nadal dostępny jest szybki przycisk dodania umówionego spotkania
+- spotkanie zapisuje się jako normalny kontakt ze statusem Umówione spotkanie
+- spotkanie dolicza się do wyniku dnia, jeśli data dotyczy tego samego dnia albo bieżącej sesji rozliczeniowej
+
+### Szybkie oznaczenie rezygnacji ze spotkania
+Jeśli kontakt odwoła spotkanie, np. SMS-em rano, agent powinien szybko oznaczyć, że spotkanie zostało odwołane albo zrezygnowane.
+To nie powinno wymagać długiego procesu edycji.
+
+Możliwe zachowanie:
+- przy kontakcie ze statusem Umówione spotkanie jest szybka akcja "Odwołane" albo "Rezygnacja"
+- aplikacja aktualizuje status albo specjalne oznaczenie spotkania
+- wynik dnia może zostać skorygowany
+- historia kontaktu zapisuje informację o rezygnacji
+
+### Korekta wyniku dnia
+Agent powinien móc korygować wynik dnia, gdy rzeczywistość zmieniła się po fakcie.
+Przykłady:
+- klient odwołał spotkanie
+- agent dopisał spotkanie po zakończeniu leadowania
+- kontakt przeniósł termin
+- spotkanie zostało umówione poza aktywną sesją
+
+To jest ważniejsze niż rozbudowane planowanie miesiąca.
+Planowanie zostaje odłożone, ale codzienna realizacja i korekta celu są podstawową potrzebą aplikacji.
+
 ## Sesja leadowania
 Rozpocznij leadowanie uruchamia licznik czasu.
 Licznik czasu jest pokazywany w formacie stopera `00:00:00`.

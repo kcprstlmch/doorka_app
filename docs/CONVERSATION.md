@@ -129,6 +129,48 @@ Najwazniejsze metryki na start:
 - Jak liczyc skutecznosc agenta.
 - Szczegoly statystyk po kliknieciu kafelka.
 
+## Planowanie pracy
+
+### Pomysl
+
+Pojawia sie nowy pomysl na sekcje planowania miesiaca, tygodnia i dnia.
+Agent moglby wpisywac planowane liczby w kalendarzu, np. liczbe umowionych spotkan i odbytych spotkan.
+Funkcja moze pomagac w komunikacji z menadzerem: agent planuje miesiac w aplikacji i wysyla zrzut ekranu.
+
+### Aktualny status
+
+Temat planowania pracy zostaje odlozony.
+Na teraz wazniejsza jest codzienna realizacja celu agenta w Dashboardzie.
+Szczegoly zapisano w `docs/sections/Planning.md`.
+
+### Do doprecyzowania
+
+- Czy to bedzie osobna sekcja, czy czesc Dashboardu albo Statystyki.
+- Czy agent wpisuje tylko liczby, czy tez notatki.
+- Czy plan ma byc porownywany z wykonaniem.
+- Czy manager docelowo ma widziec plan w aplikacji.
+
+## Codzienna realizacja celu
+
+### Najwazniejsza potrzeba
+
+Agent powinien codziennie widziec w terenie, jaki ma cel na dzisiaj, np. 9 umowionych spotkan.
+Aplikacja ma pomagac mu szybko dodawac spotkania, korygowac wynik i oznaczac sytuacje, ktore zmieniaja realizacje celu.
+
+### Przyklady sytuacji
+
+- Agent umawia spotkania w trakcie sesji leadowania.
+- Agent konczy dzien, ale pozniej dzwoni albo odpisuje kontakt z kartki i chce dopisac spotkanie.
+- Kontakt wysyla rano SMS, ze spotkanie jest odwolane.
+- Agent musi szybko oznaczyc rezygnacje albo odwolanie spotkania.
+- Wynik dnia powinien sie odpowiednio skorygowac.
+
+### Aktualny kierunek
+
+To powinno byc dostepne z Dashboardu albo aktywnego kafelka.
+Agent nie powinien szukac tych funkcji gleboko w aplikacji.
+Rozbudowane planowanie miesiaca i tygodnia zostaje pozniej.
+
 ## Konto i ustawienia
 
 ### Decyzje
@@ -136,6 +178,8 @@ Najwazniejsze metryki na start:
 - Ustawienia sa osobnym ekranem kategorii.
 - Nie pokazujemy wszystkich opcji naraz na glownym ekranie ustawien.
 - Archiwum kontaktow ma byc jedna z sekcji w ustawieniach.
+- Archiwum kontaktow znajduje sie w kategorii Konto.
+- Z archiwum agent moze przywrocic kontakt do aktywnej listy kontaktow.
 
 ### Do pozniejszego dopracowania
 
@@ -165,6 +209,7 @@ Do tematu wrocimy osobno, szczegolnie w kontekscie:
 - Finalny onboarding.
 - Polityka prywatnosci i regulamin.
 - Przypomnienia.
+- Planowanie miesiaca, tygodnia i dnia.
 - Pelne archiwum kontaktow.
 - Pelny widok szczegolowy realizacji.
 - Tryb ciemny / jasny i psychologia wyboru motywu.
