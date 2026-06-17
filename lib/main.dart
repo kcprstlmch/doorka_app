@@ -1390,19 +1390,19 @@ class _ActiveDashboardTile extends StatelessWidget {
         children: [
           Positioned.fill(
             child: Image.asset(
-              'assets/images/lead-day-card-bg.png',
+              'assets/images/active-lead-session-bg.webp',
               fit: BoxFit.cover,
-              alignment: Alignment.centerRight,
+              alignment: Alignment.topCenter,
               errorBuilder: (context, error, stackTrace) {
                 return const SizedBox.expand();
               },
             ),
           ),
           Positioned.fill(
-            child: Container(color: appWorkDark.withValues(alpha: 0.88)),
+            child: Container(color: appWorkDark.withValues(alpha: 0.55)),
           ),
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
             decoration: BoxDecoration(
               border: Border.all(color: appSurface.withValues(alpha: 0.06)),
               borderRadius: BorderRadius.circular(8),
@@ -1440,7 +1440,7 @@ class _ActiveDashboardTile extends StatelessWidget {
                       ),
                       const SizedBox(height: 14),
                       Text(
-                        'Dzień Umawiania Spotkań',
+                        'Leadowanie',
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           color: appSurface,
                           fontWeight: FontWeight.w800,
