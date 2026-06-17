@@ -45,7 +45,10 @@ Kafelek pokazuje:
 - cel na dzisiaj, jeśli agent go ustali
 - licznik czasu po rozpoczęciu sesji
 - liczbę umówionych spotkań w sesji
-- liczbę kontaktów dodanych w sesji
+- liczbę leadów dodanych w sesji
+
+W aktywnym kafelku leadowania główne liczniki mają być pokazane obok siebie w formacie:
+`Umówione: 4/9 | Leady: 6 | Czas: 01:12:33`
 
 Agent nie może rozpocząć leadowania bez podania celu.
 Jeśli agent kliknie Start bez ustawionego celu, aplikacja nie pokazuje popupu.
@@ -56,13 +59,23 @@ Cel leadowania jest ustawiany przed rozpoczęciem sesji.
 Po ustawieniu celu aktywny kafelek pokazuje cel na dzisiaj.
 Po kliknięciu Start aktywny kafelek pokazuje dodatkowo:
 - obecnie umówione spotkania w tej sesji
-- kontakty dodane w tej sesji
+- leady dodane w tej sesji
 
 Kontakty w sesji leadowania liczą kontakty dodane ze statusami:
-- Szybki kontakt
-- Zainteresowany
+- Umówione spotkanie
 - Do podjechania
-- Do zadzwonienia
+
+Szybka notatka nie liczy się do zebranych leadów.
+Kontakt roboczy nie liczy się do zebranych leadów.
+
+Reguły liczników:
+- Umówione spotkanie dodaje +1 lead i +1 umówione.
+- Do podjechania dodaje +1 lead i 0 umówionych.
+- Kontakt roboczy dodaje 0 leadów i 0 umówionych.
+- Szybka notatka dodaje 0 leadów i 0 umówionych.
+
+Jeśli agent doda Umówione spotkanie bez kliknięcia Start, aplikacja tylko zapisuje kontakt.
+Nie rozpoczyna automatycznie sesji ani cyklu.
 
 ## Codzienna realizacja celu
 Najważniejsza potrzeba aplikacji dla agenta to codzienne prowadzenie go przez realizację celu w terenie.
@@ -72,6 +85,13 @@ Przykład:
 - cel dnia: 9 umówionych spotkań
 - obecnie: 4 umówione spotkania
 - brakuje: 5 spotkań
+
+Cel 9 spotkań dotyczy dnia umawiania spotkań, czyli leadowania.
+Nie dotyczy dnia sprzedażowego.
+W dniu sprzedażowym aplikacja liczy odbyte spotkania i spisane umowy, ale nie traktuje ich jako sztywnego celu dnia.
+
+Według roboczej statystyki sprzedażowej 9 umówionych spotkań może przekładać się na około 4 odbyte spotkania i 1 sprzedaż, ale wynik sprzedażowy jest zmienny.
+Agent może odbyć jedno spotkanie i spisać jedną umowę, dlatego dzień sprzedażowy nie ma takiego samego celu jak dzień leadowania.
 
 Aktywny kafelek albo inny stale dostępny element Dashboardu powinien pomagać agentowi w pracy na bieżąco.
 Agent nie powinien szukać funkcji w wielu miejscach, gdy jest w terenie.
@@ -85,6 +105,9 @@ Możliwe zachowanie:
 - spotkanie zapisuje się jako normalny kontakt ze statusem Umówione spotkanie
 - spotkanie dolicza się do wyniku dnia, jeśli data dotyczy tego samego dnia albo bieżącej sesji rozliczeniowej
 
+Jeśli agent dodaje spotkanie po czasie, aplikacja powinna umożliwić przypisanie go do odpowiedniego cyklu.
+Docelowo aplikacja może podpowiadać cykl automatycznie na podstawie daty, ale agent powinien rozumieć, do czego spotkanie zostanie przypisane.
+
 ### Szybkie oznaczenie rezygnacji ze spotkania
 Jeśli kontakt odwoła spotkanie, np. SMS-em rano, agent powinien szybko oznaczyć, że spotkanie zostało odwołane albo zrezygnowane.
 To nie powinno wymagać długiego procesu edycji.
@@ -94,6 +117,10 @@ Możliwe zachowanie:
 - aplikacja aktualizuje status albo specjalne oznaczenie spotkania
 - wynik dnia może zostać skorygowany
 - historia kontaktu zapisuje informację o rezygnacji
+
+Odwołane spotkania nie liczą się do wyniku.
+Jeśli było `5/9`, a jedno spotkanie zostanie odwołane, wynik spada do `4/9`.
+Oficjalnie interesuje nas wynik netto.
 
 ### Korekta wyniku dnia
 Agent powinien móc korygować wynik dnia, gdy rzeczywistość zmieniła się po fakcie.
@@ -105,6 +132,78 @@ Przykłady:
 
 To jest ważniejsze niż rozbudowane planowanie miesiąca.
 Planowanie zostaje odłożone, ale codzienna realizacja i korekta celu są podstawową potrzebą aplikacji.
+
+## Cykl pracy
+Cykl pracy zaczyna się od leadowania i kończy po odbywaniu spotkań.
+Na ten moment zakładamy cykl 2-dniowy:
+
+- dzień 1: umawianie spotkań
+- dzień 2: odbywanie spotkań
+
+Cykl może być opisany zakresem dat, np. `Cykl 15-16.06`.
+Cykl zawsze zaczyna się leadowaniem i kończy odbywaniem spotkań.
+Pytanie, czy cykl może obejmować weekend, wymaga konsultacji z działającymi liderami sprzedaży.
+
+Spotkania z dnia leadowania są rozliczane w dniu sprzedażowym jako odbyte albo nieodbyte.
+Cykl kończy agent przyciskiem "Zakończ cykl".
+Jeśli agent tego nie zrobi, cykl zamyka się automatycznie po końcu dnia, czyli po 00:00:00 kolejnego dnia.
+
+## Liczniki
+W mechanizmie core występują co najmniej dwa różne liczniki.
+
+### Licznik umówionych spotkań
+Licznik umówionych spotkań dotyczy celu leadowania.
+Pokazuje wynik netto, czyli bez spotkań odwołanych.
+
+Jeśli agent w poniedziałek umawia spotkanie na środę:
+- poniedziałek dostaje +1 do pozyskanych leadów
+- środa dostaje +1 do umówionych spotkań
+
+Spotkanie umówione na dowolny przyszły dzień liczy się jako pozyskany lead w dniu, w którym zostało zdobyte, oraz jako umówione spotkanie w dniu, na który jest zaplanowane.
+Jeśli spotkanie zostanie odwołane w trakcie dnia umawiania spotkań, wynik umówionych spotkań powinien spaść.
+Jeśli spotkanie zostanie odwołane dopiero kolejnego dnia, agent nie miał już na to wpływu w trakcie leadowania, więc temat wymaga dokładniejszego modelu statystycznego.
+Na teraz oficjalnie pokazujemy aktualny wynik netto.
+
+Jeśli klient odwoła spotkanie przed jego rozpoczęciem, wpływa to na dzień sprzedażowy, ale nie zmienia wyniku dnia leadowania.
+Jeśli agent kliknął już Start spotkania / Wszedłem, nie traktujemy tej sytuacji jak zwykłe odwołanie przed spotkaniem.
+Przełożone nie liczy się do aktywnego wyniku do czasu ponownego umówienia i nie może zdublować wyniku tego samego kontaktu.
+
+### Licznik pozyskanych leadów
+Licznik "Pozyskane leady" liczy szerzej niż same umówione spotkania.
+Może obejmować:
+- umówione spotkania
+- kontakty do podjechania
+
+Szybka notatka nie liczy się jako pozyskany lead.
+Kontakt roboczy nie liczy się jako pozyskany lead.
+Kontakt Do podjechania liczy się jako pozyskany lead, ale musi mieć przynajmniej imię albo dane kontaktu, adres oraz ogólny termin.
+Kontakt Niezainteresowany nie powinien być liczony jako pozyskany lead, ponieważ jest statusem po odbytym spotkaniu.
+
+Pozyskane leady są metryką pomocniczą.
+Najważniejsze liczniki core mechanizmu to:
+- Umówione
+- Odbyte
+- Spisane umowy
+
+Licznik pozyskanych leadów powinien być dostępny dziennie, tygodniowo, miesięcznie, rocznie i ogółem.
+
+## Dzień sprzedażowy
+Dzień sprzedażowy jest osobnym szerokim tematem.
+Na ten moment wiadomo, że:
+- nie ma sztywnego celu typu 9 spotkań
+- dzień sprzedażowy zaczyna licznik odbytych spotkań od 0
+- każde odbyte spotkanie dodaje 1 do statystyki odbytych spotkań
+- spisana umowa dodaje 1 do osobnej statystyki umów
+- etap W trakcie spotkania zaczyna się dopiero po kliknięciu przez agenta Start spotkania / Wszedłem
+
+Docelowo aktywny kafelek dnia sprzedażowego może obsługiwać szybkie akcje typu:
+- wszedłem na spotkanie
+- nie wszedłem
+- czas trwania spotkania
+- spotkanie odbyte
+- spisana umowa
+
+To będzie osobny etap projektowania.
 
 ## Sesja leadowania
 Rozpocznij leadowanie uruchamia licznik czasu.
@@ -121,30 +220,49 @@ Kliknięcie "Koniec" kończy aktualną sesję leadowania.
 Po kliknięciu "Koniec" aplikacja pokazuje popup gratulujący zakończenia leadowania.
 Popup pokazuje:
 - liczbę umówionych spotkań
-- liczbę zebranych kontaktów
+- liczbę zebranych leadów łącznie
 - czas poświęcony na pracę
-- czas przerwy
 - cel sesji
 - faktycznie osiągnięty wynik
 
 Dane z popupu zakończenia sesji powinny automatycznie zapisywać się do statystyk agenta.
 
+Po dniu sprzedażowym aplikacja pokazuje podsumowanie dnia sprzedażowego.
+Następnie pokazuje Podsumowanie cyklu z gratulacjami.
+Porównanie cyklu do poprzedniego cyklu obejmuje:
+- Umówione spotkania
+- Odbyte spotkania
+- Liczbę leadów
+
+Porównanie tygodnia albo dłuższego okresu obejmuje:
+- Umówione spotkania
+- Odbyte spotkania
+- Liczbę leadów
+- Spisane umowy
+
 ## Szybkie akcje
 Pod aktywnym kafelkiem pojawiają się szybkie akcje:
 - Umów spotkanie
-- Szybki kontakt
+- Do podjechania
+- Kontakt roboczy
 - Szybka notatka
 - Zapisz teren
 - Przerwa, gdy sesja trwa
 
 Akcja "Umów spotkanie" korzysta z tego samego formularza dodawania kontaktu, ale otwiera go od razu ze statusem Umówione spotkanie.
-Akcja "Szybki kontakt" korzysta z tego samego formularza dodawania kontaktu, ale otwiera go od razu ze statusem Szybki kontakt.
+Akcja "Do podjechania" otwiera formularz dopasowany do terminu albo przedziału podjechania.
+Akcja "Kontakt roboczy" pozwala zapisać kontakt, który nie liczy się do statystyk.
 Akcja "Szybka notatka" otwiera prosty input tekstowy bez dodatkowych pól.
 
 ## Szybka notatka
 Szybka notatka pojawia się na Dashboardzie jako osobny kafelek albo lista notatek.
 Po prawej stronie notatki znajduje się przycisk X.
 Kliknięcie X usuwa szybką notatkę permanentnie z aplikacji.
+Szybka notatka jest zwykłym tekstem wpisywanym przez agenta.
+Agent może wpisać tam numer telefonu albo adres, jeśli chce.
+Szybkiej notatki nie zamieniamy na kontakt.
+Można ją tylko usunąć.
+Nie wpływa na żadne liczniki.
 
 ## Umówione na jutro
 Sekcja "Umówione na jutro" pokazuje kontakty ze spotkaniem zaplanowanym na kolejny dzień.
@@ -191,7 +309,9 @@ Docelowo system powinien wiedzieć, czy dany dzień jest dniem:
 - odpoczynku
 - regeneracji
 
-W dzień organizacji albo odpoczynku aktywny kafelek leadowania nie powinien się pojawiać.
+W dzień organizacji albo odpoczynku aktywny kafelek leadowania nie powinien się pojawiać jako aktywne wezwanie do pracy.
+Aplikacja powinna pokazać spokojny stan dnia wolnego zamiast pustki.
+Aplikacja ma próbować sama rozpoznać typ dnia, ale może też zapytać agenta o potwierdzenie.
 
 ## Powiązania z innymi sekcjami
 Dashboard korzysta z danych z:

@@ -14,6 +14,8 @@ Na tym etapie zostają główne tabele:
 - `contacts`
 - `clients`
 - `lead_sessions`
+- `work_cycles`
+- `contact_events`
 
 ## `profiles`
 Tabela profilu użytkownika połączona z Supabase Auth.
@@ -38,12 +40,19 @@ Pozostałe pola są techniczne i służą aplikacji, filtrom, powiadomieniom, ar
 
 Statusy kontaktów:
 - Umówione spotkanie
+- Spotkanie trwa
+- Spotkanie odbyte
+- Spisana umowa
 - Zainteresowany
-- Szybki kontakt
+- Kontakt roboczy
 - Do podjechania
 - Do przedzwonienia
+- Przełożone
 - Niezainteresowany
 - Brak kontaktu
+
+Mechanika statusów i przepływów kontaktów jest opisana w `docs/mechanics/CONTACT_MECHANICS.md`.
+Ten plik jest źródłem prawdy dla zachowania kontaktu, spotkania i cyklu pracy.
 
 ## `clients`
 Tabela sekcji W realizacji.
@@ -78,12 +87,56 @@ Podstawowe pola:
 - `break_seconds`
 - `created_at`
 
+## `work_cycles`
+Tabela cykli pracy agenta.
+Cykl łączy dzień leadowania i dzień sprzedażowy.
+Służy do podsumowania cyklu oraz porównywania cyklu do poprzedniego cyklu.
+
+Podstawowe pola:
+- `agent_id`
+- `lead_date`
+- `sales_date`
+- `status`
+- `scheduled_count`
+- `leads_count`
+- `completed_meetings_count`
+- `postponed_count`
+- `missed_count`
+- `signed_contracts_count`
+- `closed_at`
+- `created_at`
+
+## `contact_events`
+Tabela historii działań kontaktu.
+Zapisuje najważniejsze zdarzenia operacyjne i statystyczne.
+
+Przykłady zdarzeń:
+- dodanie kontaktu
+- zmiana statusu
+- start spotkania
+- zakończenie spotkania
+- przełożenie
+- archiwizacja
+- przeniesienie do W realizacji
+- zapis konkluzji AI
+
+Podstawowe pola:
+- `agent_id`
+- `contact_id`
+- `work_cycle_id`
+- `event_type`
+- `event_note`
+- `metadata`
+- `created_at`
+
 ## Czyszczenie bazy
 Docelowo w schemacie `public` zostawiamy tylko:
 - `profiles`
 - `contacts`
 - `clients`
 - `lead_sessions`
+- `work_cycles`
+- `contact_events`
 
 Dotychczasowe kontakty i klienci mogą zostać wyczyszczeni.
 W `profiles` zostaje konto `kcprstlmch@gmail.com`.

@@ -32,7 +32,9 @@ SupabaseClient get _supabase => Supabase.instance.client;
 
 final List<Map<String, dynamic>> _localLeadSessions = [];
 final ValueNotifier<String?> _avatarPathNotifier = ValueNotifier<String?>(null);
+final ValueNotifier<int> _defaultLeadGoalNotifier = ValueNotifier<int>(9);
 const _avatarPathPreferenceKey = 'doorka.avatar_path';
+const _defaultLeadGoalPreferenceKey = 'doorka.default_lead_goal';
 
 class DoorkaApp extends StatelessWidget {
   const DoorkaApp({super.key});
@@ -363,6 +365,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadSavedAvatarPath() async {
     final preferences = await SharedPreferences.getInstance();
     _avatarPathNotifier.value = preferences.getString(_avatarPathPreferenceKey);
+    _defaultLeadGoalNotifier.value =
+        preferences.getInt(_defaultLeadGoalPreferenceKey) ?? 9;
   }
 
   @override
@@ -621,10 +625,14 @@ class ContactStatus {
 
 const _contactStatuses = [
   ContactStatus('scheduled_meeting', 'Umówione spotkanie', Color(0xFF2F5D50)),
+  ContactStatus('meeting_active', 'Spotkanie trwa', Color(0xFF0F766E)),
+  ContactStatus('meeting_done', 'Spotkanie odbyte', Color(0xFF2374AB)),
+  ContactStatus('signed_contract', 'Spisana umowa', Color(0xFF1E8E3E)),
   ContactStatus('interested', 'Zainteresowany', Color(0xFF5B7CFA)),
-  ContactStatus('quick_contact', 'Szybki kontakt', Color(0xFF6D6A75)),
+  ContactStatus('quick_contact', 'Kontakt roboczy', Color(0xFF6D6A75)),
   ContactStatus('to_visit', 'Do podjechania', Color(0xFFF0A202)),
   ContactStatus('to_call', 'Do przedzwonienia', Color(0xFF7B61FF)),
+  ContactStatus('postponed', 'Przełożone', Color(0xFFB7791F)),
   ContactStatus('not_interested', 'Niezainteresowany', Color(0xFFD64545)),
   ContactStatus('no_contact', 'Brak kontaktu', Color(0xFF8A8F98)),
 ];
@@ -640,6 +648,27 @@ const _products = [
 ];
 
 const _qualities = ['S', 'M', 'L', 'XL'];
+const _followUpQuickTerms = [
+  _QuickTerm('Za tydzień', Duration(days: 7)),
+  _QuickTerm('Za miesiąc', Duration(days: 30)),
+  _QuickTerm('Za 3 miesiące', Duration(days: 90)),
+];
+
+const _notInterestedReasons = [
+  'Cena',
+  'Musi przemyśleć',
+  'Brak osoby decyzyjnej',
+  'Nie teraz',
+  'Beton',
+  'Inne',
+];
+
+class _QuickTerm {
+  const _QuickTerm(this.label, this.duration);
+
+  final String label;
+  final Duration duration;
+}
 
 ContactStatus _statusByValue(String value) {
   return _contactStatuses.firstWhere(
@@ -794,8 +823,6 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _areTomorrowMeetingsCollapsed = false;
   bool _showAllRecentContacts = false;
   bool _isWeeklyTileExpanded = true;
-  bool _pulseGoalButton = false;
-  int? _dailyGoal;
   int _sessionScheduledMeetings = 0;
   int _sessionCollectedContacts = 0;
   final List<String> _quickNotes = [];
@@ -858,14 +885,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void _startLeadDay() {
-    if (_dailyGoal == null) {
-      setState(() => _pulseGoalButton = true);
-      Future.delayed(const Duration(milliseconds: 900), () {
-        if (mounted) setState(() => _pulseGoalButton = false);
-      });
-      return;
-    }
-
     _leadDayTimer?.cancel();
     _leadDayBreakTimer?.cancel();
     setState(() {
@@ -968,12 +987,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     label: 'Zebrane kontakty',
                     value: _sessionCollectedContacts.toString(),
                   ),
-                  if (_dailyGoal != null)
-                    _SummaryRow(
-                      label: 'Cel na dzisiaj',
-                      value:
-                          '${_sessionScheduledMeetings.toString()} / ${_dailyGoal.toString()}',
-                    ),
+                  _SummaryRow(
+                    label: 'Cel na dzisiaj',
+                    value:
+                        '${_sessionScheduledMeetings.toString()} / ${_defaultLeadGoalNotifier.value.toString()}',
+                  ),
                   _SummaryRow(
                     label: 'Czas pracy',
                     value: _formatDuration(workTime),
@@ -997,45 +1015,6 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  Future<void> _setDailyGoal() async {
-    final controller = TextEditingController();
-    final goal = await showDialog<int>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Jaki ma być cel na dzisiaj?'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Liczba spotkań'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Anuluj'),
-            ),
-            FilledButton(
-              onPressed: () {
-                final value = int.tryParse(controller.text.trim());
-                Navigator.pop(context, value);
-              },
-              child: const Text('Ustal'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-
-    if (goal == null || goal <= 0) return;
-
-    setState(() {
-      _dailyGoal = goal;
-      _pulseGoalButton = false;
-    });
-  }
-
   Future<void> _openLeadContactForm(String status) async {
     final saved = await showAddContactSheet(context, initialStatus: status);
     if (!mounted || saved != true) return;
@@ -1044,10 +1023,8 @@ class _DashboardPageState extends State<DashboardPage> {
       _dashboardFuture = _fetchDashboardData();
       if (status == 'scheduled_meeting') {
         _sessionScheduledMeetings++;
-      } else if (status == 'quick_contact' ||
-          status == 'interested' ||
-          status == 'to_visit' ||
-          status == 'to_call') {
+        _sessionCollectedContacts++;
+      } else if (status == 'to_visit') {
         _sessionCollectedContacts++;
       }
     });
@@ -1090,6 +1067,11 @@ class _DashboardPageState extends State<DashboardPage> {
     setState(() => _quickNotes.removeAt(index));
   }
 
+  Future<void> _deleteDashboardContact(Contact contact) async {
+    await _supabase.from('contacts').delete().eq('id', contact.id);
+    _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
     return _PageShell(
@@ -1112,6 +1094,30 @@ class _DashboardPageState extends State<DashboardPage> {
               snapshot.data ??
               const _DashboardData(contacts: [], clients: [], leadSessions: []);
           final tomorrow = DateTime.now().add(const Duration(days: 1));
+          final today = DateTime.now();
+          final workingContacts = data.contacts
+              .where((contact) => contact.status == 'quick_contact')
+              .toList();
+          final todayMeetings = data.contacts.where((contact) {
+            return (contact.status == 'scheduled_meeting' ||
+                    contact.status == 'meeting_active' ||
+                    contact.status == 'postponed') &&
+                contact.contactDate != null &&
+                _isSameDay(contact.contactDate!, today);
+          }).toList()..sort((a, b) => a.contactTime.compareTo(b.contactTime));
+          final overdueMeetings = data.contacts.where((contact) {
+            if (contact.status != 'scheduled_meeting' ||
+                contact.contactDate == null) {
+              return false;
+            }
+            final contactDay = DateTime(
+              contact.contactDate!.year,
+              contact.contactDate!.month,
+              contact.contactDate!.day,
+            );
+            final todayOnly = DateTime(today.year, today.month, today.day);
+            return contactDay.isBefore(todayOnly);
+          }).toList();
           final tomorrowMeetings = data.contacts.where((contact) {
             return contact.status == 'scheduled_meeting' &&
                 contact.contactDate != null &&
@@ -1132,30 +1138,42 @@ class _DashboardPageState extends State<DashboardPage> {
             child: ListView(
               padding: const EdgeInsets.only(bottom: 96),
               children: [
-                _ActiveDashboardTile(
-                  today: DateTime.now(),
-                  dailyGoal: _dailyGoal,
-                  isStarted: _isLeadDayStarted,
-                  isPaused: _isLeadDayPaused,
-                  elapsed: _leadDayElapsed,
-                  currentMeetings: _sessionScheduledMeetings,
-                  currentContacts: _sessionCollectedContacts,
-                  shouldPulseGoalButton: _pulseGoalButton,
-                  onStart: _startLeadDay,
-                  onScheduleMeeting: () =>
-                      _openLeadContactForm('scheduled_meeting'),
-                  onSetGoal: _setDailyGoal,
+                ValueListenableBuilder<int>(
+                  valueListenable: _defaultLeadGoalNotifier,
+                  builder: (context, dailyGoal, _) {
+                    return _ActiveDashboardTile(
+                      today: DateTime.now(),
+                      dailyGoal: dailyGoal,
+                      isStarted: _isLeadDayStarted,
+                      isPaused: _isLeadDayPaused,
+                      elapsed: _leadDayElapsed,
+                      currentMeetings: _sessionScheduledMeetings,
+                      currentContacts: _sessionCollectedContacts,
+                      onStart: _startLeadDay,
+                      onScheduleMeeting: () =>
+                          _openLeadContactForm('scheduled_meeting'),
+                    );
+                  },
                 ),
                 if (_isLeadDayStarted) ...[
                   const SizedBox(height: 10),
                   _LeadDayActions(
                     isPaused: _isLeadDayPaused,
                     onQuickContact: () => _openLeadContactForm('quick_contact'),
+                    onVisitLater: () => _openLeadContactForm('to_visit'),
+                    onCallLater: () => _openLeadContactForm('to_call'),
                     onQuickNote: _addQuickNote,
                     onSaveArea: () {},
                     onPause: _pauseLeadDay,
                     onResume: _resumeLeadDay,
                     onFinish: _finishLeadDay,
+                  ),
+                ],
+                if (workingContacts.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _WorkingContactsList(
+                    contacts: workingContacts,
+                    onDelete: _deleteDashboardContact,
                   ),
                 ],
                 if (_quickNotes.isNotEmpty) ...[
@@ -1167,9 +1185,30 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
                 const SizedBox(height: 16),
                 _DashboardList(
+                  title: 'Dzień sprzedażowy',
+                  emptyText: 'Brak spotkań na dziś.',
+                  contacts: todayMeetings,
+                  leadingIcon: Icons.handshake_outlined,
+                  onDelete: _deleteDashboardContact,
+                ),
+                if (overdueMeetings.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _DashboardList(
+                    title: 'Zaległe / wymaga akcji',
+                    emptyText: 'Brak zaległych spotkań.',
+                    contacts: overdueMeetings,
+                    leadingIcon: Icons.priority_high_outlined,
+                    accentColor: appDanger,
+                    onDelete: _deleteDashboardContact,
+                  ),
+                ],
+                const SizedBox(height: 16),
+                _DashboardList(
                   title: 'Umówione na jutro',
                   emptyText: 'Brak spotkań na jutro.',
                   contacts: visibleTomorrowMeetings,
+                  leadingIcon: Icons.event_available_outlined,
+                  onDelete: _deleteDashboardContact,
                   showExpandAction: true,
                   isExpanded: !_areTomorrowMeetingsCollapsed,
                   onToggleExpanded: () => setState(
@@ -1182,6 +1221,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   title: 'Ostatnio dodane kontakty',
                   emptyText: 'Brak ostatnio dodanych kontaktów.',
                   contacts: visibleRecentContacts,
+                  onDelete: _deleteDashboardContact,
                   showExpandAction: true,
                   isExpanded: !_showAllRecentContacts,
                   onToggleExpanded: () => setState(
@@ -1328,10 +1368,8 @@ class _ActiveDashboardTile extends StatelessWidget {
     required this.elapsed,
     required this.currentMeetings,
     required this.currentContacts,
-    required this.shouldPulseGoalButton,
     required this.onStart,
     required this.onScheduleMeeting,
-    required this.onSetGoal,
   });
 
   final DateTime today;
@@ -1341,119 +1379,97 @@ class _ActiveDashboardTile extends StatelessWidget {
   final Duration elapsed;
   final int currentMeetings;
   final int currentContacts;
-  final bool shouldPulseGoalButton;
   final VoidCallback onStart;
   final VoidCallback onScheduleMeeting;
-  final VoidCallback onSetGoal;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: appWorkDark,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: Stack(
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Positioned.fill(
+            child: Image.asset(
+              'assets/images/lead-day-card-bg.png',
+              fit: BoxFit.cover,
+              alignment: Alignment.centerRight,
+              errorBuilder: (context, error, stackTrace) {
+                return const SizedBox.expand();
+              },
+            ),
+          ),
+          Positioned.fill(
+            child: Container(color: appWorkDark.withValues(alpha: 0.88)),
+          ),
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              border: Border.all(color: appSurface.withValues(alpha: 0.06)),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: const BoxDecoration(
-                        color: appSuccess,
-                        shape: BoxShape.circle,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: appSuccess,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              '${_shortDate(today)} | ${_weekdayNameFull(today)}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: appSurfaceSoft,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        '${_shortDate(today)} | ${_weekdayNameFull(today)}',
-                        maxLines: 1,
+                      const SizedBox(height: 14),
+                      Text(
+                        'Dzień Umawiania Spotkań',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          color: appSurface,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        [
+                          'Obecny cel: $currentMeetings/$dailyGoal',
+                          'Kontakty: $currentContacts',
+                          _formatDuration(elapsed),
+                        ].join(' | '),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: appSurfaceSoft,
+                          color: appWorkText,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (isStarted) ...[
-                  RichText(
-                    text: TextSpan(
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: appSurface,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      children: [
-                        const TextSpan(text: 'Czas leadowania'),
-                        const TextSpan(
-                          text: ' | ',
-                          style: TextStyle(color: appBorderStrong),
-                        ),
-                        TextSpan(text: _formatDuration(elapsed)),
-                      ],
-                    ),
+                    ],
                   ),
-                ] else
-                  Text(
-                    'Leadowanie',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: appSurface,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                const SizedBox(height: 8),
-                Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 10,
-                  runSpacing: 6,
-                  children: [
-                    if (isStarted && dailyGoal != null)
-                      Text(
-                        'Cel na dzisiaj: $dailyGoal',
-                        style: const TextStyle(
-                          color: appWorkText,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    if (isStarted && dailyGoal != null)
-                      Text(
-                        'Obecnie: $currentMeetings',
-                        style: const TextStyle(
-                          color: appWorkText,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    if (dailyGoal != null)
-                      Text(
-                        'Kontakty: $currentContacts',
-                        style: const TextStyle(
-                          color: appWorkText,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    if (!isStarted && dailyGoal == null)
-                      _SetGoalButton(
-                        pulsing: shouldPulseGoalButton,
-                        onPressed: onSetGoal,
-                      ),
-                  ],
                 ),
+                const SizedBox(width: 14),
+                _LeadTimerControls(isStarted: isStarted, onStart: onStart),
+                if (isStarted)
+                  _ActiveScheduleButton(onPressed: onScheduleMeeting),
               ],
             ),
           ),
-          const SizedBox(width: 14),
-          _LeadTimerControls(isStarted: isStarted, onStart: onStart),
-          if (isStarted) _ActiveScheduleButton(onPressed: onScheduleMeeting),
         ],
       ),
     );
@@ -1488,44 +1504,6 @@ class _ActiveScheduleButton extends StatelessWidget {
               style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SetGoalButton extends StatelessWidget {
-  const _SetGoalButton({required this.pulsing, required this.onPressed});
-
-  final bool pulsing;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return TweenAnimationBuilder<double>(
-      key: ValueKey(pulsing),
-      tween: Tween(begin: 1, end: pulsing ? 1.14 : 1),
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutBack,
-      builder: (context, scale, child) {
-        return Transform.scale(scale: scale, child: child);
-      },
-      child: FilledButton.icon(
-        style: FilledButton.styleFrom(
-          backgroundColor: appInfo,
-          foregroundColor: appSurface,
-          minimumSize: const Size(0, 34),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(999),
-          ),
-        ),
-        onPressed: onPressed,
-        icon: const Icon(Icons.check, size: 16),
-        label: const Text(
-          'Ustal cel',
-          style: TextStyle(fontWeight: FontWeight.w700),
         ),
       ),
     );
@@ -1619,6 +1597,8 @@ class _LeadDayActions extends StatelessWidget {
   const _LeadDayActions({
     required this.isPaused,
     required this.onQuickContact,
+    required this.onVisitLater,
+    required this.onCallLater,
     required this.onQuickNote,
     required this.onSaveArea,
     required this.onPause,
@@ -1628,6 +1608,8 @@ class _LeadDayActions extends StatelessWidget {
 
   final bool isPaused;
   final VoidCallback onQuickContact;
+  final VoidCallback onVisitLater;
+  final VoidCallback onCallLater;
   final VoidCallback onQuickNote;
   final VoidCallback onSaveArea;
   final VoidCallback onPause;
@@ -1639,9 +1621,21 @@ class _LeadDayActions extends StatelessWidget {
     final actions = [
       _LeadDayAction(
         Icons.person_add_alt_1_outlined,
-        'Szybki kontakt',
+        'Roboczy',
         appInfo,
         onQuickContact,
+      ),
+      _LeadDayAction(
+        Icons.directions_walk_outlined,
+        'Podjechać',
+        appWarning,
+        onVisitLater,
+      ),
+      _LeadDayAction(
+        Icons.phone_forwarded_outlined,
+        'Zadzwonić',
+        const Color(0xFF7B61FF),
+        onCallLater,
       ),
       _LeadDayAction(
         Icons.edit_note_outlined,
@@ -1649,7 +1643,6 @@ class _LeadDayActions extends StatelessWidget {
         const Color(0xFF8A6F20),
         onQuickNote,
       ),
-      _LeadDayAction(Icons.map_outlined, 'Zapisz teren', appMuted, onSaveArea),
       if (isPaused) ...[
         _LeadDayAction(Icons.play_arrow_rounded, 'Wznów', appBrand, onResume),
         _LeadDayAction(
@@ -1669,11 +1662,14 @@ class _LeadDayActions extends StatelessWidget {
         ),
     ];
 
-    return Row(
+    return Column(
       children: [
         for (var index = 0; index < actions.length; index++) ...[
-          Expanded(child: _LeadDayActionButton(action: actions[index])),
-          if (index != actions.length - 1) const SizedBox(width: 8),
+          SizedBox(
+            width: double.infinity,
+            child: _LeadDayActionButton(action: actions[index]),
+          ),
+          if (index != actions.length - 1) const SizedBox(height: 8),
         ],
       ],
     );
@@ -1795,10 +1791,12 @@ class _WeeklyDashboardTile extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Expanded(
+              Expanded(
                 child: Text(
                   'W tym tygodniu',
-                  style: TextStyle(fontWeight: FontWeight.w700),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               TextButton.icon(
@@ -1838,16 +1836,19 @@ class _WeeklyDashboardTile extends StatelessWidget {
               prefix: 'Umowy przeprocesowane',
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: _WeekMetricBox(metric: stats.processedContracts),
-                ),
-                const SizedBox(width: 8),
-                Expanded(child: _WeekMetricBox(metric: stats.meetings)),
-                const SizedBox(width: 8),
-                Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
-              ],
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _WeekMetricBox(metric: stats.processedContracts),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(child: _WeekMetricBox(metric: stats.meetings)),
+                  const SizedBox(width: 6),
+                  Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
+                ],
+              ),
             ),
           ],
         ],
@@ -1864,7 +1865,7 @@ class _WeekMetricBox extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
         color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
@@ -1873,32 +1874,30 @@ class _WeekMetricBox extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Wrap(
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 5,
-            children: [
-              Text(
-                metric.displayValue,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              _WeekChangeBadge(
-                currentValue: metric.value,
-                previousValue: metric.previousValue,
-              ),
-            ],
+          _WeekChangeBadge(
+            currentValue: metric.value,
+            previousValue: metric.previousValue,
           ),
           const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              metric.displayValue,
+              maxLines: 1,
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+            ),
+          ),
+
           Text(
             metric.label,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: appTextSecondary,
-              fontSize: 11,
+              fontSize: 10,
               fontWeight: FontWeight.w600,
+              height: 1.1,
             ),
           ),
         ],
@@ -1953,6 +1952,8 @@ class _WeekChangeBadge extends StatelessWidget {
 
     return Text(
       '$sign$difference / $sign$percent%',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: TextStyle(
         color: color,
         fontSize: 9.5,
@@ -1974,6 +1975,9 @@ class _DashboardList extends StatelessWidget {
     required this.title,
     required this.emptyText,
     required this.contacts,
+    required this.onDelete,
+    this.leadingIcon,
+    this.accentColor = appBrand,
     this.showExpandAction = false,
     this.isExpanded = false,
     this.onToggleExpanded,
@@ -1982,6 +1986,9 @@ class _DashboardList extends StatelessWidget {
   final String title;
   final String emptyText;
   final List<Contact> contacts;
+  final ValueChanged<Contact> onDelete;
+  final IconData? leadingIcon;
+  final Color accentColor;
   final bool showExpandAction;
   final bool isExpanded;
   final VoidCallback? onToggleExpanded;
@@ -2000,6 +2007,10 @@ class _DashboardList extends StatelessWidget {
         children: [
           Row(
             children: [
+              if (leadingIcon != null) ...[
+                Icon(leadingIcon, color: accentColor, size: 21),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 child: Text(
                   title,
@@ -2039,7 +2050,10 @@ class _DashboardList extends StatelessWidget {
               for (var index = 0; index < contacts.length; index++) ...[
                 if (index > 0)
                   const Divider(height: 10, thickness: 1, color: appBorder),
-                _RecentContactTile(contact: contacts[index]),
+                _RecentContactTile(
+                  contact: contacts[index],
+                  onDelete: () => onDelete(contacts[index]),
+                ),
               ],
           ],
         ],
@@ -2099,6 +2113,137 @@ class _QuickNotesList extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _WorkingContactsList extends StatelessWidget {
+  const _WorkingContactsList({required this.contacts, required this.onDelete});
+
+  final List<Contact> contacts;
+  final ValueChanged<Contact> onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.work_outline, color: appInfo, size: 21),
+              const SizedBox(width: 8),
+              Text(
+                'Robocze',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          for (var index = 0; index < contacts.length; index++) ...[
+            if (index > 0) const Divider(height: 10, color: appBorder),
+            _WorkingContactTile(
+              contact: contacts[index],
+              onDelete: () => onDelete(contacts[index]),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _WorkingContactTile extends StatelessWidget {
+  const _WorkingContactTile({required this.contact, required this.onDelete});
+
+  final Contact contact;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = contact.contactName.isEmpty
+        ? (contact.phone.isEmpty ? 'Kontakt roboczy' : contact.phone)
+        : contact.contactName;
+    final subtitle = [
+      if (contact.phone.isNotEmpty && title != contact.phone) contact.phone,
+      if (contact.address.isNotEmpty) contact.address,
+      if (contact.note.isNotEmpty) contact.note,
+    ].join(' | ');
+
+    return Dismissible(
+      key: ValueKey('dashboard-working-contact-${contact.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          color: appDanger,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.delete_outline, color: appSurface),
+      ),
+      onDismissed: (_) => onDelete(),
+      child: Material(
+        color: appSurfaceSoft,
+        borderRadius: BorderRadius.circular(8),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => showContactDetailsSheet(context, contact),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 17,
+                  backgroundColor: appInfo.withValues(alpha: 0.12),
+                  foregroundColor: appInfo,
+                  child: Text(
+                    _initials(title),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      if (subtitle.isNotEmpty)
+                        Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: appTextSecondary),
+                        ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Usuń roboczy',
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -2177,70 +2322,85 @@ class _BurstItem {
 }
 
 class _RecentContactTile extends StatelessWidget {
-  const _RecentContactTile({required this.contact});
+  const _RecentContactTile({required this.contact, required this.onDelete});
 
   final Contact contact;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: appSurfaceSoft,
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
+    return Dismissible(
+      key: ValueKey('dashboard-contact-${contact.id}'),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
+        decoration: BoxDecoration(
+          color: appDanger,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Icon(Icons.delete_outline, color: appSurface),
+      ),
+      onDismissed: (_) => onDelete(),
+      child: Material(
+        color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
-        onTap: () => showContactDetailsSheet(context, contact),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: appBrandSoft,
-                foregroundColor: appBrand,
-                child: Text(
-                  _initials(contact.contactName),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => showContactDetailsSheet(context, contact),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: appBrandSoft,
+                  foregroundColor: appBrand,
+                  child: Text(
+                    _initials(contact.contactName),
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        contact.contactName.isEmpty
+                            ? 'Bez nazwy'
+                            : contact.contactName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        _dashboardContactSubtitle(context, contact),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: appTextSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _statusByValue(contact.status).label,
                   style: const TextStyle(
-                    fontSize: 12,
+                    color: appBrand,
+                    fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      contact.contactName.isEmpty
-                          ? 'Bez nazwy'
-                          : contact.contactName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 3),
-                    Text(
-                      _dashboardContactSubtitle(context, contact),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: appTextSecondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _statusByValue(contact.status).label,
-                style: const TextStyle(
-                  color: appBrand,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -4091,15 +4251,28 @@ class _ContactTileState extends State<_ContactTile> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                contact.contactName.isEmpty
-                                    ? 'Bez nazwy'
-                                    : contact.contactName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              Row(
+                                children: [
+                                  _ContactStatusPill(status: status),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      contact.contactName.isEmpty
+                                          ? 'Bez nazwy'
+                                          : contact.contactName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ),
+                                ],
                               ),
+                              const SizedBox(height: 4),
                               if (subtitle.isNotEmpty)
                                 Text(
                                   subtitle,
@@ -4212,7 +4385,9 @@ class _ContactTileState extends State<_ContactTile> {
   }
 
   String _contactSubtitle(Contact contact) {
-    if (contact.status == 'scheduled_meeting' &&
+    if ((contact.status == 'scheduled_meeting' ||
+            contact.status == 'meeting_active' ||
+            contact.status == 'postponed') &&
         contact.contactDate != null &&
         contact.contactTime.isNotEmpty) {
       final parts = [
@@ -4223,7 +4398,62 @@ class _ContactTileState extends State<_ContactTile> {
       return parts.join(' | ');
     }
 
+    if ((contact.status == 'to_visit' || contact.status == 'to_call') &&
+        contact.contactNotification != null) {
+      final action = contact.status == 'to_visit'
+          ? 'Termin podjazdu'
+          : 'Telefon';
+      return '$action: ${_shortDate(contact.contactNotification!)} (${_weekdayName(contact.contactNotification!)})';
+    }
+
+    if (contact.status == 'quick_contact') {
+      final parts = [
+        if (contact.phone.isNotEmpty) contact.phone,
+        if (contact.address.isNotEmpty) contact.address,
+        if (contact.note.isNotEmpty) contact.note,
+      ];
+      return parts.join(' | ');
+    }
+
+    if (contact.status == 'interested') {
+      return contact.note.isEmpty
+          ? 'Klient chce, ale nie teraz. Wrócić z sugestią.'
+          : contact.note;
+    }
+
+    if (contact.status == 'meeting_active') {
+      return 'Spotkanie trwa... zakończ je wynikiem.';
+    }
+
     return contact.note;
+  }
+}
+
+class _ContactStatusPill extends StatelessWidget {
+  const _ContactStatusPill({required this.status});
+
+  final ContactStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: status.color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: status.color.withValues(alpha: 0.22)),
+      ),
+      child: Text(
+        status.label,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: status.color,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
   }
 }
 
@@ -4389,6 +4619,254 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     }
   }
 
+  Future<void> _updateContact(Map<String, dynamic> payload) async {
+    if (_isSaving) return;
+
+    setState(() => _isSaving = true);
+    try {
+      await _supabase.from('contacts').update(payload).eq('id', contact.id);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kontakt został zaktualizowany.')),
+      );
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _startMeeting() async {
+    await _updateContact({
+      'status': 'meeting_active',
+      'note': _mergeNote('Start spotkania: ${_formatDuration(Duration.zero)}'),
+    });
+  }
+
+  Future<void> _postponeMeeting() async {
+    final date = await _askPostponedDate();
+    if (!mounted) return;
+
+    if (date == null) {
+      await _updateContact({
+        'status': 'postponed',
+        'contact_notification': DateTime.now()
+            .add(const Duration(hours: 4))
+            .toIso8601String(),
+        'note': _mergeNote(
+          'Przełożone: ustalić nowy termin przed zamknięciem cyklu.',
+        ),
+      });
+      return;
+    }
+
+    await _updateContact({
+      'status': 'scheduled_meeting',
+      'contact_date': _dateOnly(date),
+      'contact_time': _timeOnly(_contactTime),
+      'meeting_time': _timeOnly(_contactTime),
+      'contact_product': _contactProduct,
+      'contact_quality': _contactQuality,
+      'contact_notification': null,
+      'note': _mergeNote(
+        'Przełożone na ${_shortDate(date)} (${_weekdayName(date)}).',
+      ),
+    });
+  }
+
+  Future<DateTime?> _askPostponedDate() async {
+    final hasDate = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Masz nowy termin?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Nie teraz'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Tak'),
+          ),
+        ],
+      ),
+    );
+
+    if (hasDate != true || !mounted) return null;
+    return showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+  }
+
+  Future<void> _finishMeeting() async {
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Jaki jest wynik spotkania?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _MeetingResultButton(
+              icon: Icons.assignment_turned_in_outlined,
+              label: 'Spisana umowa',
+              color: appSuccess,
+              onTap: () => Navigator.pop(context, 'signed_contract'),
+            ),
+            const SizedBox(height: 10),
+            _MeetingResultButton(
+              icon: Icons.trending_up_outlined,
+              label: 'Zainteresowany',
+              color: appInfo,
+              onTap: () => Navigator.pop(context, 'interested'),
+            ),
+            const SizedBox(height: 10),
+            _MeetingResultButton(
+              icon: Icons.do_not_disturb_on_outlined,
+              label: 'Nie zainteresowany',
+              color: appDanger,
+              onTap: () => Navigator.pop(context, 'not_interested'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result == null || !mounted) return;
+
+    if (result == 'signed_contract') {
+      await _finishSignedContract();
+    } else if (result == 'interested') {
+      await _updateContact({
+        'status': 'interested',
+        'note': _mergeNote(
+          'Wynik spotkania: zainteresowany. Wrócić z kontekstową sugestią.',
+        ),
+      });
+    } else {
+      await _finishNotInterested();
+    }
+  }
+
+  Future<void> _finishSignedContract() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Przenieść do W realizacji?'),
+        content: const Text(
+          'Spotkanie zostanie zapisane jako odbyte i z umową.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Nie teraz'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Przenieś'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _moveContactToClients();
+      return;
+    }
+
+    await _updateContact({
+      'status': 'signed_contract',
+      'note': _mergeNote('Wynik spotkania: spisana umowa.'),
+    });
+  }
+
+  Future<void> _moveContactToClients() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    setState(() => _isSaving = true);
+    try {
+      await _supabase.from('clients').insert({
+        'agent_id': user.id,
+        'source_contact_id': contact.id,
+        'client_name': _nameController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'correspondence_address': _addressController.text.trim(),
+        'installation_address': _addressController.text.trim(),
+        'product_name': _contactProduct,
+        'contract_signed_at': _dateOnly(DateTime.now()),
+        'execution_method': 'finansowanie',
+        'status': 'signed_contract',
+      });
+
+      await _supabase
+          .from('contacts')
+          .update({
+            'status': 'signed_contract',
+            'moved_to_client_at': DateTime.now().toIso8601String(),
+            'note': _mergeNote(
+              'Wynik spotkania: spisana umowa. Przeniesiono do W realizacji.',
+            ),
+          })
+          .eq('id', contact.id);
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Kontakt przeniesiony do W realizacji.')),
+      );
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _finishNotInterested() async {
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Jaki powód?'),
+        children: [
+          for (final reason in _notInterestedReasons)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, reason),
+              child: Text(reason),
+            ),
+        ],
+      ),
+    );
+
+    if (reason == null || !mounted) return;
+    final shouldArchive = reason == 'Cena' || reason == 'Beton';
+    await _updateContact({
+      'status': shouldArchive ? 'not_interested' : 'interested',
+      'archived_at': shouldArchive ? DateTime.now().toIso8601String() : null,
+      'note': _mergeNote(
+        'Wynik spotkania: nie zainteresowany. Powód: $reason.',
+      ),
+    });
+  }
+
+  String _mergeNote(String entry) {
+    final existing = _noteController.text.trim();
+    final timestamp =
+        '${_shortDate(DateTime.now())} ${_timeOnly(TimeOfDay.now())}';
+    final next = '[$timestamp] $entry';
+    if (existing.isEmpty) return next;
+    return '$existing\n$next';
+  }
+
   TimeOfDay _timeOfDayFromText(String value) {
     final parts = value.split(':');
     if (parts.length < 2) return const TimeOfDay(hour: 18, minute: 0);
@@ -4442,6 +4920,12 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         time.hour,
         time.minute,
       );
+    });
+  }
+
+  void _setQuickNotification(Duration duration) {
+    setState(() {
+      _contactNotification = DateTime.now().add(duration);
     });
   }
 
@@ -4517,6 +5001,23 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                   ),
               ],
             ),
+            if (_status == 'scheduled_meeting' ||
+                _status == 'meeting_active' ||
+                _status == 'postponed') ...[
+              const SizedBox(height: 12),
+              _MeetingActionPanel(
+                status: _status,
+                onStart: _startMeeting,
+                onFinish: _finishMeeting,
+                onPostpone: _postponeMeeting,
+                onArchive: () => _updateContact({
+                  'archived_at': DateTime.now().toIso8601String(),
+                  'note': _mergeNote(
+                    'Kontakt zamknięty i przeniesiony do archiwum.',
+                  ),
+                }),
+              ),
+            ],
             const SizedBox(height: 18),
             TextField(
               controller: _nameController,
@@ -4578,8 +5079,12 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                 },
               ),
             ],
-            if (_status == 'to_call' || _status == 'to_visit') ...[
+            if (_status == 'to_call' ||
+                _status == 'to_visit' ||
+                _status == 'postponed') ...[
               const SizedBox(height: 12),
+              _QuickTermChips(onSelected: _setQuickNotification),
+              const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _pickNotification,
                 icon: const Icon(Icons.event_outlined),
@@ -4642,6 +5147,139 @@ class _DetailRow extends StatelessWidget {
             ).textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MeetingActionPanel extends StatelessWidget {
+  const _MeetingActionPanel({
+    required this.status,
+    required this.onStart,
+    required this.onFinish,
+    required this.onPostpone,
+    required this.onArchive,
+  });
+
+  final String status;
+  final VoidCallback onStart;
+  final VoidCallback onFinish;
+  final VoidCallback onPostpone;
+  final VoidCallback onArchive;
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = status == 'meeting_active';
+    final title = isActive ? 'Spotkanie trwa...' : 'Co robimy ze spotkaniem?';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: appSurfaceSoft,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: appBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isActive
+                    ? Icons.timer_outlined
+                    : Icons.event_available_outlined,
+                color: appBrand,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (isActive)
+            FilledButton.icon(
+              onPressed: onFinish,
+              icon: const Icon(Icons.flag_outlined),
+              label: const Text('Zakończ spotkanie'),
+            )
+          else
+            FilledButton.icon(
+              onPressed: onStart,
+              icon: const Icon(Icons.play_arrow_rounded),
+              label: const Text('Start spotkania'),
+            ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onPostpone,
+                  icon: const Icon(Icons.update_outlined),
+                  label: const Text('Przełóż'),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onArchive,
+                  icon: const Icon(Icons.archive_outlined),
+                  label: const Text('Archiwum'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _MeetingResultButton extends StatelessWidget {
+  const _MeetingResultButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.10),
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 58),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.24)),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              Icon(Icons.chevron_right, color: color),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -5222,6 +5860,8 @@ class _AccountPageState extends State<AccountPage> {
   bool _emailReports = false;
   bool _weeklyReports = false;
   bool _monthlyReports = false;
+  bool _autoRecordMeetings = true;
+  int _defaultLeadGoal = 9;
 
   void _showOnboardingPreview() {
     showDialog<void>(
@@ -5331,6 +5971,58 @@ class _AccountPageState extends State<AccountPage> {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_avatarPathPreferenceKey, image.path);
     _avatarPathNotifier.value = image.path;
+  }
+
+  Future<void> _editDefaultLeadGoal() async {
+    final controller = TextEditingController(text: _defaultLeadGoal.toString());
+    final value = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cel domyślny'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Liczba spotkań'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Anuluj'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(context, int.tryParse(controller.text.trim())),
+            child: const Text('Zapisz'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+
+    if (value == null || value <= 0) return;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setInt(_defaultLeadGoalPreferenceKey, value);
+    _defaultLeadGoalNotifier.value = value;
+    setState(() => _defaultLeadGoal = value);
+  }
+
+  void _showAiInstructionPlaceholder() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Instrukcja dla agenta AI'),
+        content: const Text(
+          'To będzie miejsce na instrukcję, według której aplikacja analizuje lokalne nagrania i wyciąga konkluzje dla agenta.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -5484,10 +6176,15 @@ class _AccountPageState extends State<AccountPage> {
                   label: 'Koniec tygodnia pracy',
                   value: 'Piątek',
                 ),
-                const _SettingsRow(
+                _SettingsRow(
                   icon: Icons.flag_outlined,
                   label: 'Cel leadowania',
-                  value: 'Ustalany przed startem',
+                  value: '$_defaultLeadGoal spotkań',
+                ),
+                _SettingsAction(
+                  icon: Icons.flag_circle_outlined,
+                  label: 'Ustaw cel leadowania',
+                  onTap: _editDefaultLeadGoal,
                 ),
                 const _SettingsRow(
                   icon: Icons.sync_alt_outlined,
@@ -5536,11 +6233,54 @@ class _AccountPageState extends State<AccountPage> {
                   value: '18:00',
                 ),
                 _SettingsSwitch(
+                  icon: Icons.mic_none_outlined,
+                  label: 'Automatyczne nagrywanie spotkań',
+                  value: _autoRecordMeetings,
+                  onChanged: (value) =>
+                      setState(() => _autoRecordMeetings = value),
+                ),
+                _SettingsSwitch(
                   icon: Icons.notifications_paused_outlined,
                   label: 'Powiadomienia podczas spotkań sprzedażowych',
                   value: _salesMeetingNotifications,
                   onChanged: (value) =>
                       setState(() => _salesMeetingNotifications = value),
+                ),
+              ],
+            ),
+          ),
+          _SettingsCategoryTile(
+            icon: Icons.psychology_alt_outlined,
+            title: 'Mechanika 1.2',
+            subtitle: 'Agent AI w tle, statusy i podsumowania',
+            onTap: () => _openSettingsCategory(
+              title: 'Mechanika 1.2',
+              icon: Icons.psychology_alt_outlined,
+              children: [
+                const _SettingsRow(
+                  icon: Icons.auto_awesome_outlined,
+                  label: 'Agent AI',
+                  value: 'Ukryty mechanizm w tle',
+                ),
+                const _SettingsRow(
+                  icon: Icons.insights_outlined,
+                  label: 'Analiza nagrań',
+                  value: 'Konkluzje zapisują się na stałe',
+                ),
+                const _SettingsRow(
+                  icon: Icons.route_outlined,
+                  label: 'Cykl pracy',
+                  value: 'Leadowanie + dzień sprzedażowy',
+                ),
+                const _SettingsRow(
+                  icon: Icons.inventory_2_outlined,
+                  label: 'Produkty',
+                  value: 'Edytowalne w ustawieniach',
+                ),
+                _SettingsAction(
+                  icon: Icons.description_outlined,
+                  label: 'Instrukcja dla agenta AI',
+                  onTap: _showAiInstructionPlaceholder,
                 ),
               ],
             ),
@@ -5951,7 +6691,7 @@ class _OnboardingPreviewDialogState extends State<_OnboardingPreviewDialog> {
   static const _titles = [
     'Ustaw rytm pracy',
     'Wybierz dni leadowania',
-    'Ustal cel',
+    'Ustaw cel leadowania',
   ];
 
   void _next() {
@@ -6136,7 +6876,7 @@ class _OnboardingStepContent extends StatelessWidget {
         return const _OnboardingChoiceGrid(
           title: 'Jaki typ dnia chcesz skonfigurować jako pierwszy?',
           choices: [
-            _OnboardingChoice(Icons.directions_walk, 'Leadowanie'),
+            _OnboardingChoice(Icons.directions_walk, 'Umawianie spotkań'),
             _OnboardingChoice(Icons.handshake_outlined, 'Spotkania'),
             _OnboardingChoice(Icons.event_note_outlined, 'Organizacja'),
             _OnboardingChoice(Icons.self_improvement_outlined, 'Odpoczynek'),
@@ -6548,7 +7288,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
   TimeOfDay _contactTime = const TimeOfDay(hour: 18, minute: 0);
   String _contactProduct = _products.first;
   String? _contactQuality;
-  DateTime? _contactNotification;
+  DateTime? _contactNotification = DateTime.now().add(const Duration(days: 7));
   bool _isSaving = false;
 
   @override
@@ -6599,7 +7339,9 @@ class _AddContactSheetState extends State<AddContactSheet> {
         });
       }
 
-      if (_status == 'to_call' || _status == 'to_visit') {
+      if (_status == 'to_call' ||
+          _status == 'to_visit' ||
+          _status == 'postponed') {
         payload['contact_notification'] = _contactNotification
             ?.toIso8601String();
       }
@@ -6653,7 +7395,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
     );
     if (picked == null) return;
     setState(() => _contactDate = picked);
-    _syncMeetingNoteHeader();
   }
 
   Future<void> _pickContactTime() async {
@@ -6663,7 +7404,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
     );
     if (picked == null) return;
     setState(() => _contactTime = picked);
-    _syncMeetingNoteHeader();
   }
 
   Future<void> _pickNotification() async {
@@ -6693,24 +7433,32 @@ class _AddContactSheetState extends State<AddContactSheet> {
     });
   }
 
-  void _syncMeetingNoteHeader() {
-    if (_status != 'scheduled_meeting') return;
-
-    final quality = _contactQuality == null ? '' : ' | $_contactQuality';
-    final header =
-        '${_shortDate(_contactDate)} (${_weekdayName(_contactDate)}), ${_timeOnly(_contactTime)} | $_contactProduct$quality | ';
-    final note = _noteController.text;
-    final body = note.replaceFirst(
-      RegExp(
-        r'^\d{2}\.\d{2} \([^)]+\), \d{2}:\d{2} \| [^|]+( \| [SMLX]+)? \| ?',
-      ),
-      '',
-    );
-    _noteController.text = '$header$body';
-    _noteController.selection = TextSelection.collapsed(
-      offset: _noteController.text.length,
-    );
+  void _setQuickNotification(Duration duration) {
+    setState(() => _contactNotification = DateTime.now().add(duration));
   }
+
+  String get _formTitle {
+    return switch (_status) {
+      'scheduled_meeting' => 'Umów spotkanie',
+      'to_visit' => 'Do podjechania',
+      'to_call' => 'Do przedzwonienia',
+      'quick_contact' => 'Kontakt roboczy',
+      'postponed' => 'Przełożone',
+      _ => 'Dodaj kontakt',
+    };
+  }
+
+  String get _formHint {
+    return switch (_status) {
+      'scheduled_meeting' => 'Minimum: dane kontaktu, adres, dzień i produkt.',
+      'to_visit' => 'Minimum: dane kontaktu, adres i ogólny termin.',
+      'to_call' => 'Wybierz termin, żeby aplikacja przypomniała o telefonie.',
+      'quick_contact' => 'To nie jest lead. Wystarczy telefon albo adres.',
+      _ => 'Dodaj dane, które pozwolą wrócić do sprawy.',
+    };
+  }
+
+  bool get _showStatusPicker => false;
 
   @override
   Widget build(BuildContext context) {
@@ -6725,10 +7473,24 @@ class _AddContactSheetState extends State<AddContactSheet> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _formTitle,
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  _ContactStatusPill(status: _statusByValue(_status)),
+                ],
+              ),
+              const SizedBox(height: 6),
               Text(
-                'Dodaj kontakt',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
+                _formHint,
+                style: const TextStyle(
+                  color: appTextSecondary,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(height: 18),
@@ -6753,23 +7515,24 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 controller: _addressController,
                 decoration: const InputDecoration(labelText: 'Adres'),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                initialValue: _status,
-                decoration: const InputDecoration(labelText: 'Status'),
-                items: [
-                  for (final status in _contactStatuses)
-                    DropdownMenuItem(
-                      value: status.value,
-                      child: Text(status.label),
-                    ),
-                ],
-                onChanged: (value) {
-                  if (value == null) return;
-                  setState(() => _status = value);
-                  _syncMeetingNoteHeader();
-                },
-              ),
+              if (_showStatusPicker) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _status,
+                  decoration: const InputDecoration(labelText: 'Status'),
+                  items: [
+                    for (final status in _contactStatuses)
+                      DropdownMenuItem(
+                        value: status.value,
+                        child: Text(status.label),
+                      ),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _status = value);
+                  },
+                ),
+              ],
               if (_status == 'scheduled_meeting') ...[
                 const SizedBox(height: 12),
                 _MeetingFields(
@@ -6782,16 +7545,18 @@ class _AddContactSheetState extends State<AddContactSheet> {
                   onProductChanged: (value) {
                     if (value == null) return;
                     setState(() => _contactProduct = value);
-                    _syncMeetingNoteHeader();
                   },
                   onQualityChanged: (value) {
                     setState(() => _contactQuality = value);
-                    _syncMeetingNoteHeader();
                   },
                 ),
               ],
-              if (_status == 'to_call' || _status == 'to_visit') ...[
+              if (_status == 'to_call' ||
+                  _status == 'to_visit' ||
+                  _status == 'postponed') ...[
                 const SizedBox(height: 12),
+                _QuickTermChips(onSelected: _setQuickNotification),
+                const SizedBox(height: 8),
                 OutlinedButton.icon(
                   onPressed: _pickNotification,
                   icon: const Icon(Icons.event_outlined),
@@ -6812,6 +7577,24 @@ class _AddContactSheetState extends State<AddContactSheet> {
                   final phone = _phoneController.text.trim();
                   final address = _addressController.text.trim();
                   final note = (value ?? '').trim();
+                  if (_status == 'scheduled_meeting' && address.isEmpty) {
+                    return 'Umówione spotkanie musi mieć adres.';
+                  }
+                  if (_status == 'to_visit' &&
+                      (_nameController.text.trim().isEmpty ||
+                          address.isEmpty ||
+                          _contactNotification == null)) {
+                    return 'Do podjechania wymaga danych kontaktu, adresu i terminu.';
+                  }
+                  if ((_status == 'to_call' || _status == 'postponed') &&
+                      _contactNotification == null) {
+                    return 'Ustaw termin przypomnienia.';
+                  }
+                  if (_status == 'quick_contact' &&
+                      phone.isEmpty &&
+                      address.isEmpty) {
+                    return 'Kontakt roboczy wymaga telefonu albo adresu.';
+                  }
                   if (phone.isEmpty && address.isEmpty && note.isEmpty) {
                     return 'Dodaj telefon, adres albo notatkę rozpoznawczą.';
                   }
@@ -6896,6 +7679,28 @@ class _MeetingFields extends StatelessWidget {
           ],
           onChanged: onQualityChanged,
         ),
+      ],
+    );
+  }
+}
+
+class _QuickTermChips extends StatelessWidget {
+  const _QuickTermChips({required this.onSelected});
+
+  final ValueChanged<Duration> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final term in _followUpQuickTerms)
+          ActionChip(
+            avatar: const Icon(Icons.schedule, size: 16),
+            label: Text(term.label),
+            onPressed: () => onSelected(term.duration),
+          ),
       ],
     );
   }

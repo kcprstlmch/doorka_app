@@ -135,6 +135,10 @@ String _normalizeContactStatus(String status) {
     'quick_contact' ||
     'to_visit' ||
     'to_call' ||
+    'postponed' ||
+    'meeting_active' ||
+    'meeting_done' ||
+    'signed_contract' ||
     'not_interested' ||
     'no_contact' => status,
     _ => 'scheduled_meeting',

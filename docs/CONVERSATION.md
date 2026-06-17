@@ -157,6 +157,14 @@ Szczegoly zapisano w `docs/sections/Planning.md`.
 Agent powinien codziennie widziec w terenie, jaki ma cel na dzisiaj, np. 9 umowionych spotkan.
 Aplikacja ma pomagac mu szybko dodawac spotkania, korygowac wynik i oznaczac sytuacje, ktore zmieniaja realizacje celu.
 
+Cel 9 spotkan dotyczy leadowania, czyli dnia umawiania spotkan.
+Nie jest celem dnia sprzedazowego.
+Dzien sprzedazowy liczy odbyte spotkania i spisane umowy, ale nie ma sztywnego celu typu 9/9.
+
+Oficjalny wynik celu leadowania jest liczony netto.
+Odwolane spotkania nie licza sie do wyniku.
+Jesli bylo 5/9 i jedno spotkanie zostaje odwolane, wynik spada do 4/9.
+
 ### Przyklady sytuacji
 
 - Agent umawia spotkania w trakcie sesji leadowania.
@@ -170,6 +178,49 @@ Aplikacja ma pomagac mu szybko dodawac spotkania, korygowac wynik i oznaczac syt
 To powinno byc dostepne z Dashboardu albo aktywnego kafelka.
 Agent nie powinien szukac tych funkcji gleboko w aplikacji.
 Rozbudowane planowanie miesiaca i tygodnia zostaje pozniej.
+
+### Cykl pracy
+
+Na teraz zakladamy cykl 2-dniowy:
+
+- dzien 1: umawianie spotkan
+- dzien 2: odbywanie spotkan
+
+Cykl zawsze zaczyna sie leadowaniem i konczy odbywaniem spotkan.
+Robocza nazwa cyklu moze byc zakresem dat, np. `Cykl 15-16.06`.
+Pytanie, czy cykl moze obejmowac weekend, zostalo zapisane do `docs/questions_to_leaders.md`.
+
+### Liczniki
+
+W core mechanizmie rozrozniamy:
+
+- Umowione jako cel leadowania
+- Odbyte jako licznik dnia sprzedazowego
+- Spisane umowy jako wynik sprzedazowy
+- Pozyskane leady jako pomocnicza metryka aktywnosci agenta
+
+Pozyskane leady obejmuja m.in. umowione spotkania i Do podjechania.
+Szybka notatka nie liczy sie jako pozyskany lead.
+Kontakt roboczy nie liczy sie jako pozyskany lead.
+Kontakt Niezainteresowany nie powinien byc liczony jako pozyskany lead, bo jest statusem po odbytym spotkaniu.
+
+Robocza nazwa "Kontakt roboczy" oznacza kontakt zapisany po to, zeby agent o nim nie zapomnial, ale bez zaliczania do statystyk.
+Przyklad: osoba trzecia podaje numer telefonu do osoby decyzyjnej.
+Szybka notatka jest jeszcze luzniejsza: zwykly tekst na Dashboardzie, bez statystyk.
+
+W trybie leadowania agent nie powinien recznie wybierac statusu.
+Status ma wynikac z przycisku: Umow spotkanie, Do podjechania, Kontakt roboczy albo Szybka notatka.
+
+Statusy kontaktow trzeba rozdzielic na etapy:
+
+- w trakcie umawiania spotkania
+- przed odbyciem spotkania
+- w trakcie odbywania spotkania
+- po odbytym spotkaniu
+- po spisanej umowie
+
+Jesli agent w poniedzialek umawia spotkanie na srode, poniedzialek dostaje +1 do pozyskanych leadow, a sroda dostaje +1 do umowionych spotkan.
+Umowione spotkanie jest zawsze czescia pozyskanych leadow.
 
 ## Konto i ustawienia
 
