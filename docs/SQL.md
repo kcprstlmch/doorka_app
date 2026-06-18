@@ -131,9 +131,7 @@ alter table public.contacts
     'meeting_done',
     'signed_contract',
     'interested',
-    'quick_contact',
-    'to_visit',
-    'to_call',
+    'contact',
     'postponed',
     'not_interested',
     'no_contact'
@@ -336,9 +334,8 @@ set
   moved_to_client_at = null,
   status = case
     when status in ('signed_contract', 'lead', 'client') then 'scheduled_meeting'
-    when status = 'contact' then 'to_call'
+    when status in ('contact', 'quick_contact', 'to_visit', 'to_call', 'visit_required') then 'contact'
     when status = 'lost' then 'not_interested'
-    when status = 'visit_required' then 'to_visit'
     when status is null then 'scheduled_meeting'
     else status
   end
@@ -485,13 +482,16 @@ $do$;
 
 update public.contacts
 set status = case status
-  when 'contact' then 'to_call'
+  when 'quick_contact' then 'contact'
+  when 'to_visit' then 'contact'
+  when 'to_call' then 'contact'
+  when 'visit_required' then 'contact'
   when 'lead' then 'scheduled_meeting'
   when 'client' then 'scheduled_meeting'
   when 'lost' then 'not_interested'
   else status
 end
-where status in ('contact', 'lead', 'client', 'lost');
+where status in ('quick_contact', 'to_visit', 'to_call', 'visit_required', 'lead', 'client', 'lost');
 
 update public.contacts
 set
@@ -509,10 +509,12 @@ alter table public.contacts
   add constraint contacts_status_check
   check (status in (
     'scheduled_meeting',
+    'meeting_active',
+    'meeting_done',
+    'signed_contract',
     'interested',
-    'quick_contact',
-    'to_visit',
-    'to_call',
+    'contact',
+    'postponed',
     'not_interested',
     'no_contact'
   ));

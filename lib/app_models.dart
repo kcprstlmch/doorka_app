@@ -122,16 +122,13 @@ String normalizeExecutionMethod(String method) {
 String _normalizeContactStatus(String status) {
   return switch (status) {
     'signed_contract' => 'scheduled_meeting',
-    'visit_required' => 'to_visit',
-    'contact' => 'to_call',
+    'visit_required' || 'quick_contact' || 'to_visit' || 'to_call' => 'contact',
     'lead' => 'scheduled_meeting',
     'client' => 'scheduled_meeting',
     'lost' => 'not_interested',
     'scheduled_meeting' ||
     'interested' ||
-    'quick_contact' ||
-    'to_visit' ||
-    'to_call' ||
+    'contact' ||
     'postponed' ||
     'meeting_active' ||
     'meeting_done' ||

@@ -629,20 +629,13 @@ const _contactStatuses = [
   ContactStatus('meeting_done', 'Spotkanie odbyte', Color(0xFF2374AB)),
   ContactStatus('signed_contract', 'Spisana umowa', Color(0xFF1E8E3E)),
   ContactStatus('interested', 'Zainteresowany', Color(0xFF5B7CFA)),
-  ContactStatus('quick_contact', 'Kontakt roboczy', Color(0xFF6D6A75)),
-  ContactStatus('to_visit', 'Do podjechania', Color(0xFFF0A202)),
-  ContactStatus('to_call', 'Do przedzwonienia', Color(0xFF7B61FF)),
+  ContactStatus('contact', 'Kontakt', Color(0xFF6D6A75)),
   ContactStatus('postponed', 'Przełożone', Color(0xFFB7791F)),
   ContactStatus('not_interested', 'Niezainteresowany', Color(0xFFD64545)),
   ContactStatus('no_contact', 'Brak kontaktu', Color(0xFF8A8F98)),
 ];
 
 const _qualities = ['S', 'M', 'L', 'XL'];
-const _followUpQuickTerms = [
-  _QuickTerm('Za tydzień', Duration(days: 7)),
-  _QuickTerm('Za miesiąc', Duration(days: 30)),
-  _QuickTerm('Za 3 miesiące', Duration(days: 90)),
-];
 
 bool _isMeetingStatus(String status) {
   return status == 'scheduled_meeting' ||
@@ -660,13 +653,6 @@ const _notInterestedReasons = [
   'Beton',
   'Inne',
 ];
-
-class _QuickTerm {
-  const _QuickTerm(this.label, this.duration);
-
-  final String label;
-  final Duration duration;
-}
 
 ContactStatus _statusByValue(String value) {
   return _contactStatuses.firstWhere(
@@ -829,11 +815,8 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isLeadDayPaused = false;
   bool _areTomorrowMeetingsCollapsed = false;
   bool _isWeeklyTileExpanded = true;
-  int _sessionScheduledMeetings = 0;
   int _sessionCollectedContacts = 0;
-  final List<String> _quickNotes = [];
   Duration _leadDayElapsed = Duration.zero;
-  Duration _leadDayBreakElapsed = Duration.zero;
   Timer? _leadDayTimer;
   Timer? _leadDayBreakTimer;
 
@@ -897,8 +880,6 @@ class _DashboardPageState extends State<DashboardPage> {
       _isLeadDayStarted = true;
       _isLeadDayPaused = false;
       _leadDayElapsed = Duration.zero;
-      _leadDayBreakElapsed = Duration.zero;
-      _sessionScheduledMeetings = 0;
       _sessionCollectedContacts = 0;
     });
     _leadDayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -907,169 +888,16 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  void _pauseLeadDay() {
-    setState(() => _isLeadDayPaused = true);
-    _leadDayBreakTimer?.cancel();
-    _leadDayBreakTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || !_isLeadDayPaused) return;
-      setState(() => _leadDayBreakElapsed += const Duration(seconds: 1));
-    });
-  }
-
-  void _resumeLeadDay() {
-    _leadDayBreakTimer?.cancel();
-    setState(() => _isLeadDayPaused = false);
-  }
-
-  void _finishLeadDay() {
-    final workTime = _leadDayElapsed;
-    final breakTime = _leadDayBreakElapsed;
-    _leadDayTimer?.cancel();
-    _leadDayBreakTimer?.cancel();
-    _leadDayTimer = null;
-    _leadDayBreakTimer = null;
-    _localLeadSessions.add({
-      'session_date': _dateOnly(DateTime.now()),
-      'scheduled_meetings_count': _sessionScheduledMeetings,
-      'collected_contacts_count': _sessionCollectedContacts,
-      'work_seconds': workTime.inSeconds,
-      'break_seconds': breakTime.inSeconds,
-    });
-    setState(() {
-      _isLeadDayStarted = false;
-      _isLeadDayPaused = false;
-      _leadDayElapsed = Duration.zero;
-      _leadDayBreakElapsed = Duration.zero;
-    });
-    _saveLeadSessionStats(workTime: workTime, breakTime: breakTime);
-    _showLeadDaySummary(workTime: workTime, breakTime: breakTime);
-  }
-
-  Future<void> _saveLeadSessionStats({
-    required Duration workTime,
-    required Duration breakTime,
-  }) async {
-    final userId = _supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    try {
-      await _supabase.from('lead_sessions').insert({
-        'agent_id': userId,
-        'session_date': _dateOnly(DateTime.now()),
-        'scheduled_meetings_count': _sessionScheduledMeetings,
-        'collected_contacts_count': _sessionCollectedContacts,
-        'work_seconds': workTime.inSeconds,
-        'break_seconds': breakTime.inSeconds,
-      });
-    } catch (_) {
-      // Tabela statystyk sesji zostanie dodana po dopięciu modelu Supabase.
-    }
-  }
-
-  Future<void> _showLeadDaySummary({
-    required Duration workTime,
-    required Duration breakTime,
-  }) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            const Positioned.fill(child: _CelebrationBurst()),
-            AlertDialog(
-              title: const Text('Gratulacje, leadowanie zakończone!'),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Podsumowanie tej sesji:'),
-                  const SizedBox(height: 14),
-                  _SummaryRow(
-                    label: 'Umówione spotkania',
-                    value: _sessionScheduledMeetings.toString(),
-                  ),
-                  _SummaryRow(
-                    label: 'Zebrane kontakty',
-                    value: _sessionCollectedContacts.toString(),
-                  ),
-                  _SummaryRow(
-                    label: 'Cel na dzisiaj',
-                    value:
-                        '${_sessionScheduledMeetings.toString()} / ${_defaultLeadGoalNotifier.value.toString()}',
-                  ),
-                  _SummaryRow(
-                    label: 'Czas pracy',
-                    value: _formatDuration(workTime),
-                  ),
-                  _SummaryRow(
-                    label: 'Czas przerwy',
-                    value: _formatDuration(breakTime),
-                  ),
-                ],
-              ),
-              actions: [
-                FilledButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Zamknij'),
-                ),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   Future<void> _openLeadContactForm(String status) async {
     final saved = await showAddContactSheet(context, initialStatus: status);
     if (!mounted || saved != true) return;
 
     setState(() {
       _dashboardFuture = _fetchDashboardData();
-      if (status == 'scheduled_meeting') {
-        _sessionScheduledMeetings++;
-      } else if (status == 'to_visit') {
+      if (status == 'contact') {
         _sessionCollectedContacts++;
       }
     });
-  }
-
-  Future<void> _addQuickNote() async {
-    final controller = TextEditingController();
-    final note = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Szybka notatka'),
-          content: TextField(
-            controller: controller,
-            autofocus: true,
-            minLines: 2,
-            maxLines: 4,
-            decoration: const InputDecoration(labelText: 'Treść notatki'),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Anuluj'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: const Text('Dodaj'),
-            ),
-          ],
-        );
-      },
-    );
-    controller.dispose();
-
-    if (note == null || note.isEmpty) return;
-    setState(() => _quickNotes.insert(0, note));
-  }
-
-  void _deleteQuickNote(int index) {
-    setState(() => _quickNotes.removeAt(index));
   }
 
   Future<void> _deleteDashboardContact(Contact contact) async {
@@ -1165,41 +993,15 @@ class _DashboardPageState extends State<DashboardPage> {
                       isStarted: _isLeadDayStarted,
                       isPaused: _isLeadDayPaused,
                       elapsed: _leadDayElapsed,
-                      currentMeetings: _sessionScheduledMeetings,
+                      currentMeetings: scheduledMeetings.length,
                       currentContacts: _sessionCollectedContacts,
                       onStart: _startLeadDay,
                       onScheduleMeeting: () =>
                           _openLeadContactForm('scheduled_meeting'),
-                      onAddLead: () => _openLeadContactForm('quick_contact'),
+                      onAddLead: () => _openLeadContactForm('contact'),
                     );
                   },
                 ),
-                if (_isLeadDayStarted) ...[
-                  const SizedBox(height: 10),
-                  _DashboardBodyPadding(
-                    child: _LeadDayActions(
-                      isPaused: _isLeadDayPaused,
-                      onQuickContact: () =>
-                          _openLeadContactForm('quick_contact'),
-                      onVisitLater: () => _openLeadContactForm('to_visit'),
-                      onCallLater: () => _openLeadContactForm('to_call'),
-                      onQuickNote: _addQuickNote,
-                      onSaveArea: () {},
-                      onPause: _pauseLeadDay,
-                      onResume: _resumeLeadDay,
-                      onFinish: _finishLeadDay,
-                    ),
-                  ),
-                ],
-                if (_quickNotes.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _DashboardBodyPadding(
-                    child: _QuickNotesList(
-                      notes: _quickNotes,
-                      onDelete: _deleteQuickNote,
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 16),
                 _DashboardBodyPadding(
                   child: _DashboardList(
@@ -1233,7 +1035,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 _DashboardBodyPadding(
                   child: _DashboardList(
                     title: 'Zebrane kontakty',
-                    emptyText: 'Brak zebranych kontaktów.',
+                    emptyText: 'Tutaj pojawią się zebrane leady',
                     contacts: visibleCollectedContacts,
                     leadingIcon: Icons.event_available_outlined,
                     onDelete: _deleteDashboardContact,
@@ -1422,70 +1224,77 @@ class _ActiveDashboardTile extends StatelessWidget {
             child: Container(color: appWorkDark.withValues(alpha: 0.70)),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 40),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            width: 10,
-                            height: 10,
-                            decoration: const BoxDecoration(
-                              color: appSuccess,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Text(
-                              '${_shortDate(today)} | ${_weekdayNameFull(today)}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: appSurfaceSoft,
-                                fontWeight: FontWeight.w700,
+                          Row(
+                            children: [
+                              Container(
+                                width: 10,
+                                height: 10,
+                                decoration: const BoxDecoration(
+                                  color: appSuccess,
+                                  shape: BoxShape.circle,
+                                ),
                               ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  '${_shortDate(today)} | ${_weekdayNameFull(today)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: appSurfaceSoft,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            'Leadowanie',
+                            style: Theme.of(context).textTheme.titleLarge
+                                ?.copyWith(
+                                  color: appSurface,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            [
+                              'Obecny cel: $currentMeetings/$dailyGoal',
+                              'Kontakty: $currentContacts',
+                              _formatDuration(elapsed),
+                            ].join(' | '),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: appWorkText,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
-                      Text(
-                        'Leadowanie',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          color: appSurface,
-                          fontWeight: FontWeight.w800,
-                        ),
+                    ),
+                    const SizedBox(width: 14),
+                    _LeadTimerControls(isStarted: isStarted, onStart: onStart),
+                    if (isStarted)
+                      _ActiveLeadButtons(
+                        onScheduleMeeting: onScheduleMeeting,
+                        onAddLead: onAddLead,
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        [
-                          'Obecny cel: $currentMeetings/$dailyGoal',
-                          'Kontakty: $currentContacts',
-                          _formatDuration(elapsed),
-                        ].join(' | '),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: appWorkText,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-                const SizedBox(width: 14),
-                _LeadTimerControls(isStarted: isStarted, onStart: onStart),
-                if (isStarted)
-                  _ActiveLeadButtons(
-                    onScheduleMeeting: onScheduleMeeting,
-                    onAddLead: onAddLead,
-                  ),
               ],
             ),
           ),
@@ -1669,127 +1478,6 @@ class _LeadControlButton extends StatelessWidget {
   }
 }
 
-class _LeadDayActions extends StatelessWidget {
-  const _LeadDayActions({
-    required this.isPaused,
-    required this.onQuickContact,
-    required this.onVisitLater,
-    required this.onCallLater,
-    required this.onQuickNote,
-    required this.onSaveArea,
-    required this.onPause,
-    required this.onResume,
-    required this.onFinish,
-  });
-
-  final bool isPaused;
-  final VoidCallback onQuickContact;
-  final VoidCallback onVisitLater;
-  final VoidCallback onCallLater;
-  final VoidCallback onQuickNote;
-  final VoidCallback onSaveArea;
-  final VoidCallback onPause;
-  final VoidCallback onResume;
-  final VoidCallback onFinish;
-
-  @override
-  Widget build(BuildContext context) {
-    final actions = [
-      _LeadDayAction(
-        Icons.person_add_alt_1_rounded,
-        'Roboczo',
-        appInfo,
-        onQuickContact,
-      ),
-      _LeadDayAction(
-        Icons.directions_walk_rounded,
-        'Podjedź',
-        appWarning,
-        onVisitLater,
-      ),
-      _LeadDayAction(
-        Icons.phone_forwarded_rounded,
-        'Zadzwoń',
-        const Color(0xFF7B61FF),
-        onCallLater,
-      ),
-      _LeadDayAction(
-        Icons.edit_note_rounded,
-        'Notatka',
-        const Color(0xFF8A6F20),
-        onQuickNote,
-      ),
-      if (isPaused) ...[
-        _LeadDayAction(Icons.play_arrow_rounded, 'Wznów', appBrand, onResume),
-        _LeadDayAction(
-          Icons.stop_rounded,
-          'Koniec',
-          appDanger,
-          onFinish,
-          filled: true,
-        ),
-      ] else
-        _LeadDayAction(
-          Icons.stop_rounded,
-          'Przerwa',
-          appDanger,
-          onPause,
-          filled: true,
-        ),
-    ];
-
-    return Row(
-      children: [
-        for (var index = 0; index < actions.length; index++) ...[
-          Expanded(child: _LeadDayActionButton(action: actions[index])),
-          if (index != actions.length - 1) const SizedBox(width: 6),
-        ],
-      ],
-    );
-  }
-}
-
-class _LeadDayActionButton extends StatelessWidget {
-  const _LeadDayActionButton({required this.action});
-
-  final _LeadDayAction action;
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      style: OutlinedButton.styleFrom(
-        backgroundColor: action.color,
-        foregroundColor: appSurface,
-        fixedSize: const Size(45, 45),
-        side: BorderSide(color: action.color, width: 1.5),
-        padding: EdgeInsets.zero,
-        shape: const CircleBorder(),
-      ),
-      onPressed: action.onPressed,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [Icon(action.icon, size: 27, color: appSurface)],
-      ),
-    );
-  }
-}
-
-class _LeadDayAction {
-  const _LeadDayAction(
-    this.icon,
-    this.label,
-    this.color,
-    this.onPressed, {
-    this.filled = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final Color color;
-  final VoidCallback onPressed;
-  final bool filled;
-}
-
 class _WeekDashboardStats {
   const _WeekDashboardStats({
     required this.processedContracts,
@@ -1837,85 +1525,47 @@ class _WeeklyDashboardTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                'W tym tygodniu',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-            TextButton.icon(
-              style: TextButton.styleFrom(
-                foregroundColor: appTextPrimary,
-                minimumSize: Size.zero,
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: onToggleExpanded,
-              icon: Icon(
-                isExpanded
-                    ? Icons.keyboard_arrow_up
-                    : Icons.keyboard_arrow_down,
-                size: 18,
-              ),
-              iconAlignment: IconAlignment.end,
-              label: Text(
-                isExpanded ? 'Zwiń' : 'Rozwiń',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        ),
-        if (isExpanded) ...[
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: appSurface,
-              border: Border.all(color: appBorderStrong),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    if (!isExpanded) return const SizedBox.shrink();
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            stats.processedContracts.value.toString(),
+            style: Theme.of(
+              context,
+            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 2),
+          _WeekComparisonText(
+            currentValue: stats.processedContracts.value,
+            previousValue: stats.processedContracts.previousValue,
+            prefix: 'Umowy przeprocesowane',
+          ),
+          const SizedBox(height: 12),
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  stats.processedContracts.value.toString(),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                Expanded(
+                  child: _WeekMetricBox(metric: stats.processedContracts),
                 ),
-                const SizedBox(height: 2),
-                _WeekComparisonText(
-                  currentValue: stats.processedContracts.value,
-                  previousValue: stats.processedContracts.previousValue,
-                  prefix: 'Umowy przeprocesowane',
-                ),
-                const SizedBox(height: 12),
-                IntrinsicHeight(
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: _WeekMetricBox(metric: stats.processedContracts),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(child: _WeekMetricBox(metric: stats.meetings)),
-                      const SizedBox(width: 6),
-                      Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
-                    ],
-                  ),
-                ),
+                const SizedBox(width: 6),
+                Expanded(child: _WeekMetricBox(metric: stats.meetings)),
+                const SizedBox(width: 6),
+                Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
               ],
             ),
           ),
         ],
-      ],
+      ),
     );
   }
 }
@@ -2064,148 +1714,46 @@ class _DashboardList extends StatelessWidget {
   Widget build(BuildContext context) {
     final useSplitMeetingTiles = onEditMeetingTime != null;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            if (leadingIcon != null) ...[
-              Icon(leadingIcon, color: accentColor, size: 21),
-              const SizedBox(width: 8),
-            ],
-            Expanded(
-              child: Text(
-                title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ),
-            if (headerTrailing != null) ...[
-              const SizedBox(width: 8),
-              Text(
-                headerTrailing!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: appTextSecondary,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-            if (showExpandAction)
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: appBrand,
-                  minimumSize: const Size(0, 36),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: onToggleExpanded,
-                icon: Icon(
-                  isExpanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 18,
-                ),
-                iconAlignment: IconAlignment.end,
-                label: Text(
-                  isExpanded ? 'Zwiń' : 'Rozwiń',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-              ),
-          ],
-        ),
-        if (!showExpandAction || isExpanded) ...[
-          const SizedBox(height: 10),
-          if (useSplitMeetingTiles)
+    if (showExpandAction && !isExpanded) return const SizedBox.shrink();
+
+    if (useSplitMeetingTiles) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (contacts.isEmpty)
             Container(
-              decoration: BoxDecoration(
-                color: appSurface,
-                border: Border.all(color: appBorderStrong),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (contacts.isEmpty)
-                    SizedBox(
-                      width: double.infinity,
-                      child: Text(
-                        emptyText,
-                        style: const TextStyle(color: appTextSecondary),
-                      ),
-                    )
-                  else
-                    for (var index = 0; index < contacts.length; index++) ...[
-                      if (index > 0)
-                        const Divider(
-                          height: 10,
-                          thickness: 1,
-                          color: appBorder,
-                        ),
-                      _RecentContactTile(
-                        contact: contacts[index],
-                        onDelete: () => onDelete(contacts[index]),
-                        onEditMeetingTime: () =>
-                            onEditMeetingTime!(contacts[index]),
-                      ),
-                    ],
-                ],
-              ),
-            )
-          else
-            Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
                 color: appSurface,
                 border: Border.all(color: appBorderStrong),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (contacts.isEmpty)
-                    SizedBox(
-                      width: double.infinity,
-                      child: Text(
-                        emptyText,
-                        style: const TextStyle(color: appTextSecondary),
-                      ),
-                    )
-                  else
-                    for (var index = 0; index < contacts.length; index++) ...[
-                      if (index > 0)
-                        const Divider(
-                          height: 10,
-                          thickness: 1,
-                          color: appBorder,
-                        ),
-                      _RecentContactTile(
-                        contact: contacts[index],
-                        onDelete: () => onDelete(contacts[index]),
-                      ),
-                    ],
-                ],
+              child: SizedBox(
+                width: double.infinity,
+                child: Text(
+                  emptyText,
+                  style: const TextStyle(color: appTextSecondary),
+                ),
               ),
-            ),
+            )
+          else
+            for (var index = 0; index < contacts.length; index++) ...[
+              if (index > 0) const SizedBox(height: 10),
+              _RecentContactTile(
+                contact: contacts[index],
+                onDelete: () => onDelete(contacts[index]),
+                onEditMeetingTime: useSplitMeetingTiles
+                    ? () => onEditMeetingTime!(contacts[index])
+                    : null,
+              ),
+            ],
         ],
-      ],
-    );
-  }
-}
+      );
+    }
 
-class _QuickNotesList extends StatelessWidget {
-  const _QuickNotesList({required this.notes, required this.onDelete});
-
-  final List<String> notes;
-  final ValueChanged<int> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(
         color: appSurface,
         border: Border.all(color: appBorderStrong),
@@ -2214,114 +1762,27 @@ class _QuickNotesList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Szybkie notatki',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 10),
-          for (var index = 0; index < notes.length; index++) ...[
-            if (index > 0) const Divider(height: 10, color: appBorder),
-            Material(
-              color: appSurfaceSoft,
-              borderRadius: BorderRadius.circular(8),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        notes[index],
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Usuń notatkę',
-                      onPressed: () => onDelete(index),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
+          if (contacts.isEmpty)
+            SizedBox(
+              width: double.infinity,
+              child: Text(
+                emptyText,
+                style: const TextStyle(color: appTextSecondary),
               ),
-            ),
-          ],
+            )
+          else
+            for (var index = 0; index < contacts.length; index++) ...[
+              if (index > 0)
+                const Divider(height: 10, thickness: 1, color: appBorder),
+              _RecentContactTile(
+                contact: contacts[index],
+                onDelete: () => onDelete(contacts[index]),
+              ),
+            ],
         ],
       ),
     );
   }
-}
-
-class _SummaryRow extends StatelessWidget {
-  const _SummaryRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Expanded(child: Text(label)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ],
-      ),
-    );
-  }
-}
-
-class _CelebrationBurst extends StatelessWidget {
-  const _CelebrationBurst();
-
-  @override
-  Widget build(BuildContext context) {
-    return IgnorePointer(
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(begin: 0, end: 1),
-        duration: const Duration(milliseconds: 1100),
-        curve: Curves.easeOutBack,
-        builder: (context, value, _) {
-          return Container(
-            color: Colors.transparent,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                for (final item in const [
-                  _BurstItem(-130, -150, Color(0xFFF0C857)),
-                  _BurstItem(140, -140, Color(0xFF62BE72)),
-                  _BurstItem(-150, 120, Color(0xFF2563A9)),
-                  _BurstItem(150, 130, Color(0xFFA8473B)),
-                  _BurstItem(0, -190, Color(0xFFEAF3EC)),
-                  _BurstItem(0, 185, Color(0xFFF0C857)),
-                ])
-                  Transform.translate(
-                    offset: Offset(item.dx * value, item.dy * value),
-                    child: Opacity(
-                      opacity: (1 - value * 0.05).clamp(0, 1),
-                      child: Icon(
-                        Icons.auto_awesome,
-                        color: item.color,
-                        size: 24 + value * 8,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _BurstItem {
-  const _BurstItem(this.dx, this.dy, this.color);
-
-  final double dx;
-  final double dy;
-  final Color color;
 }
 
 class _RecentContactTile extends StatelessWidget {
@@ -2385,67 +1846,111 @@ class _MeetingDashboardTileContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final note = contact.note.trim();
+
     return Material(
       color: appSurfaceSoft,
-      borderRadius: BorderRadius.circular(8),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: appBorderStrong),
+      ),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () => showContactDetailsSheet(context, contact),
         child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10, // lewy i prawy
+            vertical: 8, // górny i dolny
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: onEditMeetingTime,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 3,
-                  ),
-                  child: Text(
-                    timeText,
-                    style: const TextStyle(
-                      color: appBrand,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
+              Row(
+                children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: onEditMeetingTime,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 4,
+                      ),
+                      child: Text(
+                        timeText,
+                        style: const TextStyle(
+                          color: appBrand,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _DashboardContactText(
-                  contact: contact,
-                  titleFontSize: 15,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Nawiguj',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: contact.address.isEmpty
-                        ? null
-                        : () => _openMap(context, contact.address),
-                    icon: const Icon(Icons.home_outlined),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _DashboardContactTitle(
+                      contact: contact,
+                      titleFontSize: 15,
+                    ),
                   ),
-                  IconButton(
-                    tooltip: 'Zadzwoń',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: contact.phone.isEmpty
-                        ? null
-                        : () => _callPhone(context, contact.phone),
-                    icon: const Icon(Icons.phone_outlined),
+                  const SizedBox(width: 8),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Nawiguj',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: contact.address.isEmpty
+                            ? null
+                            : () => _openMap(context, contact.address),
+                        icon: const Icon(Icons.home_outlined),
+                      ),
+                      IconButton(
+                        tooltip: 'Zadzwoń',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: contact.phone.isEmpty
+                            ? null
+                            : () => _callPhone(context, contact.phone),
+                        icon: const Icon(Icons.phone_outlined),
+                      ),
+                    ],
                   ),
                 ],
               ),
+              if (note.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                const Divider(height: 1, thickness: 1, color: appBorder),
+                const SizedBox(height: 4),
+                Text(
+                  note,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: appTextSecondary, fontSize: 12),
+                ),
+              ],
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _DashboardContactTitle extends StatelessWidget {
+  const _DashboardContactTitle({required this.contact, this.titleFontSize});
+
+  final Contact contact;
+  final double? titleFontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      contact.contactName.isEmpty ? 'Bez nazwy' : contact.contactName,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: const TextStyle(
+        color: appTextPrimary,
+        fontWeight: FontWeight.w900,
+      ).copyWith(fontSize: titleFontSize),
     );
   }
 }
@@ -2503,10 +2008,9 @@ class _ContactDashboardTileContent extends StatelessWidget {
 }
 
 class _DashboardContactText extends StatelessWidget {
-  const _DashboardContactText({required this.contact, this.titleFontSize});
+  const _DashboardContactText({required this.contact});
 
   final Contact contact;
-  final double? titleFontSize;
 
   @override
   Widget build(BuildContext context) {
@@ -2522,7 +2026,7 @@ class _DashboardContactText extends StatelessWidget {
           style: const TextStyle(
             color: appTextPrimary,
             fontWeight: FontWeight.w900,
-          ).copyWith(fontSize: titleFontSize),
+          ),
         ),
         if (subtitle.isNotEmpty) ...[
           const SizedBox(height: 3),
@@ -4520,15 +4024,7 @@ class _ContactTileState extends State<_ContactTile> {
       return parts.join(' | ');
     }
 
-    if ((contact.status == 'to_visit' || contact.status == 'to_call') &&
-        contact.contactNotification != null) {
-      final action = contact.status == 'to_visit'
-          ? 'Termin podjazdu'
-          : 'Telefon';
-      return '$action: ${_shortDate(contact.contactNotification!)} (${_weekdayName(contact.contactNotification!)})';
-    }
-
-    if (contact.status == 'quick_contact') {
+    if (contact.status == 'contact') {
       final parts = [
         if (contact.phone.isNotEmpty) contact.phone,
         if (contact.address.isNotEmpty) contact.address,
@@ -4653,7 +4149,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
   late DateTime _contactDate;
   late TimeOfDay _contactTime;
   String? _contactQuality;
-  DateTime? _contactNotification;
   bool _isSaving = false;
 
   Contact get contact => widget.contact;
@@ -4674,7 +4169,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     _contactQuality = contact.contactQuality.isEmpty
         ? null
         : contact.contactQuality;
-    _contactNotification = contact.contactNotification;
   }
 
   @override
@@ -4711,11 +4205,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
           'meeting_time': _timeOnly(_contactTime),
           'contact_quality': _contactQuality,
         });
-      }
-
-      if (_status == 'to_call' || _status == 'to_visit') {
-        payload['contact_notification'] = _contactNotification
-            ?.toIso8601String();
       }
 
       await _supabase.from('contacts').update(payload).eq('id', contact.id);
@@ -5006,39 +4495,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     setState(() => _contactTime = picked);
   }
 
-  Future<void> _pickNotification() async {
-    final initial = _contactNotification ?? DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      initialDate: initial,
-      firstDate: DateTime.now().subtract(const Duration(days: 365)),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (date == null || !mounted) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(initial),
-    );
-    if (time == null) return;
-
-    setState(() {
-      _contactNotification = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-      );
-    });
-  }
-
-  void _setQuickNotification(Duration duration) {
-    setState(() {
-      _contactNotification = DateTime.now().add(duration);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final status = _statusByValue(_status);
@@ -5160,15 +4616,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
               ],
               onChanged: (value) {
                 if (value == null) return;
-                setState(() {
-                  _status = value;
-                  if ((_status == 'to_call' || _status == 'to_visit') &&
-                      _contactNotification == null) {
-                    _contactNotification = DateTime.now().add(
-                      const Duration(days: 1),
-                    );
-                  }
-                });
+                setState(() => _status = value);
               },
             ),
             if (_status == 'scheduled_meeting') ...[
@@ -5182,22 +4630,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                 onQualityChanged: (value) {
                   setState(() => _contactQuality = value);
                 },
-              ),
-            ],
-            if (_status == 'to_call' ||
-                _status == 'to_visit' ||
-                _status == 'postponed') ...[
-              const SizedBox(height: 12),
-              _QuickTermChips(onSelected: _setQuickNotification),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: _pickNotification,
-                icon: const Icon(Icons.event_outlined),
-                label: Text(
-                  _contactNotification == null
-                      ? 'Ustaw termin'
-                      : '${_shortDate(_contactNotification!)} (${_weekdayName(_contactNotification!)}), ${_timeOnly(TimeOfDay.fromDateTime(_contactNotification!))}',
-                ),
               ),
             ],
             const SizedBox(height: 12),
@@ -6000,6 +5432,14 @@ class _AccountPageState extends State<AccountPage> {
     );
   }
 
+  void _openUnprocessedMeetings() {
+    _openSettingsCategory(
+      title: 'Nieprzerobione spotkania',
+      icon: Icons.pending_actions_outlined,
+      children: const [_UnprocessedMeetingsList()],
+    );
+  }
+
   void _openSettingsCategory({
     required String title,
     required IconData icon,
@@ -6187,6 +5627,11 @@ class _AccountPageState extends State<AccountPage> {
                   onTap: _openArchivedContacts,
                 ),
                 _SettingsAction(
+                  icon: Icons.pending_actions_outlined,
+                  label: 'Nieprzerobione spotkania',
+                  onTap: _openUnprocessedMeetings,
+                ),
+                _SettingsAction(
                   icon: Icons.lock_reset_outlined,
                   label: 'Zmiana hasła',
                   onTap: () {},
@@ -6350,6 +5795,11 @@ class _AccountPageState extends State<AccountPage> {
                   value: _salesMeetingNotifications,
                   onChanged: (value) =>
                       setState(() => _salesMeetingNotifications = value),
+                ),
+                _SettingsAction(
+                  icon: Icons.pending_actions_outlined,
+                  label: 'Nieprzerobione spotkania',
+                  onTap: _openUnprocessedMeetings,
                 ),
               ],
             ),
@@ -7152,6 +6602,281 @@ class _GoalPreviewTile extends StatelessWidget {
   }
 }
 
+class _UnprocessedMeetingsList extends StatefulWidget {
+  const _UnprocessedMeetingsList();
+
+  @override
+  State<_UnprocessedMeetingsList> createState() =>
+      _UnprocessedMeetingsListState();
+}
+
+class _UnprocessedMeetingsListState extends State<_UnprocessedMeetingsList> {
+  late Future<List<Contact>> _meetingsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _meetingsFuture = _fetchMeetings();
+  }
+
+  Future<List<Contact>> _fetchMeetings() async {
+    final data = await _supabase
+        .from('contacts')
+        .select()
+        .isFilter('archived_at', null)
+        .isFilter('moved_to_client_at', null);
+
+    final today = DateTime.now();
+    final todayOnly = DateTime(today.year, today.month, today.day);
+
+    return (data as List)
+        .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
+        .where((contact) {
+          if (contact.status == 'meeting_active' ||
+              contact.status == 'postponed') {
+            return true;
+          }
+
+          if (contact.status != 'scheduled_meeting' ||
+              contact.contactDate == null) {
+            return false;
+          }
+
+          final meetingDay = DateTime(
+            contact.contactDate!.year,
+            contact.contactDate!.month,
+            contact.contactDate!.day,
+          );
+          return meetingDay.isBefore(todayOnly);
+        })
+        .toList()
+      ..sort((a, b) {
+        final aDate = a.contactDate ?? DateTime(1900);
+        final bDate = b.contactDate ?? DateTime(1900);
+        final dateCompare = bDate.compareTo(aDate);
+        if (dateCompare != 0) return dateCompare;
+        return b.contactTime.compareTo(a.contactTime);
+      });
+  }
+
+  void _reload() {
+    setState(() => _meetingsFuture = _fetchMeetings());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<Contact>>(
+      future: _meetingsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Padding(
+            padding: EdgeInsets.all(18),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return _SettingsInfoCard(
+            icon: Icons.error_outline,
+            title: 'Nie udało się pobrać spotkań',
+            text: snapshot.error.toString(),
+          );
+        }
+
+        final meetings = snapshot.data ?? [];
+        if (meetings.isEmpty) {
+          return const _SettingsInfoCard(
+            icon: Icons.check_circle_outline,
+            title: 'Brak nieprzerobionych spotkań',
+            text: 'Wszystkie zapisane spotkania są domknięte albo aktualne.',
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _SettingsInfoCard(
+              icon: Icons.pending_actions_outlined,
+              title: 'Do przerobienia',
+              text:
+                  'Masz ${meetings.length} spotkań, które wymagają rozliczenia albo decyzji.',
+            ),
+            const SizedBox(height: 10),
+            for (var index = 0; index < meetings.length; index++) ...[
+              if (index > 0) const SizedBox(height: 8),
+              _UnprocessedMeetingTile(
+                contact: meetings[index],
+                onChanged: _reload,
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _SettingsInfoCard extends StatelessWidget {
+  const _SettingsInfoCard({
+    required this.icon,
+    required this.title,
+    required this.text,
+  });
+
+  final IconData icon;
+  final String title;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: appBrand, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: appTextPrimary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(text, style: const TextStyle(color: appTextSecondary)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UnprocessedMeetingTile extends StatelessWidget {
+  const _UnprocessedMeetingTile({
+    required this.contact,
+    required this.onChanged,
+  });
+
+  final Contact contact;
+  final VoidCallback onChanged;
+
+  String get _dateText {
+    if (contact.contactDate == null) return 'Bez daty';
+    return '${_shortDate(contact.contactDate!)} | ${_weekdayNameFull(contact.contactDate!)}';
+  }
+
+  String get _timeText {
+    if (contact.contactTime.length >= 5) {
+      return contact.contactTime.substring(0, 5);
+    }
+    return contact.contactTime.isEmpty ? '--:--' : contact.contactTime;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _statusByValue(contact.status);
+    final note = contact.note.trim();
+
+    return Material(
+      color: appSurface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: appBorderStrong),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () async {
+          await showContactDetailsSheet(context, contact);
+          onChanged();
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: status.color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: status.color.withValues(alpha: 0.24),
+                      ),
+                    ),
+                    child: Text(
+                      _timeText,
+                      style: TextStyle(
+                        color: status.color,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      contact.contactName.isEmpty
+                          ? 'Bez nazwy'
+                          : contact.contactName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: appTextPrimary,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Icon(Icons.chevron_right, color: status.color),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '$_dateText · ${status.label}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: appTextSecondary,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 12,
+                ),
+              ),
+              if (note.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                const Divider(height: 1, color: appBorder),
+                const SizedBox(height: 6),
+                Text(
+                  note,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: appTextSecondary, fontSize: 12),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SettingsRow extends StatelessWidget {
   const _SettingsRow({
     required this.icon,
@@ -7392,7 +7117,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
   DateTime _contactDate = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _contactTime = const TimeOfDay(hour: 18, minute: 0);
   String? _contactQuality;
-  DateTime? _contactNotification = DateTime.now().add(const Duration(days: 7));
   bool _isSaving = false;
 
   @override
@@ -7440,13 +7164,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
           'meeting_time': _timeOnly(_contactTime),
           'contact_quality': _contactQuality,
         });
-      }
-
-      if (_status == 'to_call' ||
-          _status == 'to_visit' ||
-          _status == 'postponed') {
-        payload['contact_notification'] = _contactNotification
-            ?.toIso8601String();
       }
 
       await _supabase.from('contacts').insert(payload);
@@ -7509,43 +7226,10 @@ class _AddContactSheetState extends State<AddContactSheet> {
     setState(() => _contactTime = picked);
   }
 
-  Future<void> _pickNotification() async {
-    final date = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now().add(const Duration(days: 1)),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-    );
-    if (date == null) return;
-    if (!mounted) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: const TimeOfDay(hour: 9, minute: 0),
-    );
-    if (time == null) return;
-
-    setState(() {
-      _contactNotification = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-      );
-    });
-  }
-
-  void _setQuickNotification(Duration duration) {
-    setState(() => _contactNotification = DateTime.now().add(duration));
-  }
-
   String get _formTitle {
     return switch (_status) {
       'scheduled_meeting' => 'Umów spotkanie',
-      'to_visit' => 'Do podjechania',
-      'to_call' => 'Do przedzwonienia',
-      'quick_contact' => 'Kontakt roboczy',
+      'contact' => 'Dodaj kontakt',
       'postponed' => 'Przełożone',
       _ => 'Dodaj kontakt',
     };
@@ -7554,10 +7238,8 @@ class _AddContactSheetState extends State<AddContactSheet> {
   String get _formHint {
     return switch (_status) {
       'scheduled_meeting' => 'Minimum: dane kontaktu, adres i dzień.',
-      'to_visit' => 'Minimum: dane kontaktu, adres i ogólny termin.',
-      'to_call' => 'Wybierz termin, żeby aplikacja przypomniała o telefonie.',
-      'quick_contact' => 'To nie jest lead. Wystarczy telefon albo adres.',
-      _ => 'Dodaj dane, które pozwolą wrócić do sprawy.',
+      'contact' => 'Zapisz dane kontaktu, do którego chcesz wrócić.',
+      _ => 'Dodaj dane kontaktu.',
     };
   }
 
@@ -7601,7 +7283,8 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 controller: _nameController,
                 decoration: const InputDecoration(labelText: 'Dane kontaktu'),
                 validator: (value) {
-                  if ((value ?? '').trim().isEmpty) {
+                  if (_status == 'scheduled_meeting' &&
+                      (value ?? '').trim().isEmpty) {
                     return 'Wpisz dane kontaktu.';
                   }
                   return null;
@@ -7649,22 +7332,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
                   },
                 ),
               ],
-              if (_status == 'to_call' ||
-                  _status == 'to_visit' ||
-                  _status == 'postponed') ...[
-                const SizedBox(height: 12),
-                _QuickTermChips(onSelected: _setQuickNotification),
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _pickNotification,
-                  icon: const Icon(Icons.event_outlined),
-                  label: Text(
-                    _contactNotification == null
-                        ? 'Ustaw termin'
-                        : '${_shortDate(_contactNotification!)} (${_weekdayName(_contactNotification!)}), ${_timeOnly(TimeOfDay.fromDateTime(_contactNotification!))}',
-                  ),
-                ),
-              ],
               const SizedBox(height: 12),
               TextFormField(
                 controller: _noteController,
@@ -7675,26 +7342,16 @@ class _AddContactSheetState extends State<AddContactSheet> {
                   final phone = _phoneController.text.trim();
                   final address = _addressController.text.trim();
                   final note = (value ?? '').trim();
+                  final name = _nameController.text.trim();
                   if (_status == 'scheduled_meeting' && address.isEmpty) {
                     return 'Umówione spotkanie musi mieć adres.';
                   }
-                  if (_status == 'to_visit' &&
-                      (_nameController.text.trim().isEmpty ||
-                          address.isEmpty ||
-                          _contactNotification == null)) {
-                    return 'Do podjechania wymaga danych kontaktu, adresu i terminu.';
-                  }
-                  if ((_status == 'to_call' || _status == 'postponed') &&
-                      _contactNotification == null) {
-                    return 'Ustaw termin przypomnienia.';
-                  }
-                  if (_status == 'quick_contact' &&
+                  if (_status == 'contact' &&
+                      name.isEmpty &&
                       phone.isEmpty &&
-                      address.isEmpty) {
-                    return 'Kontakt roboczy wymaga telefonu albo adresu.';
-                  }
-                  if (phone.isEmpty && address.isEmpty && note.isEmpty) {
-                    return 'Dodaj telefon, adres albo notatkę rozpoznawczą.';
+                      address.isEmpty &&
+                      note.isEmpty) {
+                    return 'Dodaj dane kontaktu, telefon, adres albo notatkę.';
                   }
                   return null;
                 },
@@ -7702,7 +7359,15 @@ class _AddContactSheetState extends State<AddContactSheet> {
               const SizedBox(height: 20),
               FilledButton(
                 onPressed: _isSaving ? null : _save,
-                child: Text(_isSaving ? 'Umawiam...' : 'Umów spotkanie'),
+                child: Text(
+                  _isSaving
+                      ? (_status == 'scheduled_meeting'
+                            ? 'Umawiam...'
+                            : 'Zapisuję...')
+                      : (_status == 'scheduled_meeting'
+                            ? 'Umów spotkanie'
+                            : 'Dodaj kontakt'),
+                ),
               ),
             ],
           ),
@@ -7763,28 +7428,6 @@ class _MeetingFields extends StatelessWidget {
           ],
           onChanged: onQualityChanged,
         ),
-      ],
-    );
-  }
-}
-
-class _QuickTermChips extends StatelessWidget {
-  const _QuickTermChips({required this.onSelected});
-
-  final ValueChanged<Duration> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final term in _followUpQuickTerms)
-          ActionChip(
-            avatar: const Icon(Icons.schedule, size: 16),
-            label: Text(term.label),
-            onPressed: () => onSelected(term.duration),
-          ),
       ],
     );
   }
