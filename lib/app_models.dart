@@ -8,7 +8,6 @@ class Contact {
     required this.note,
     required this.contactDate,
     required this.contactTime,
-    required this.contactProduct,
     required this.contactQuality,
     required this.contactNotification,
   });
@@ -21,7 +20,6 @@ class Contact {
   final String note;
   final DateTime? contactDate;
   final String contactTime;
-  final String contactProduct;
   final String contactQuality;
   final DateTime? contactNotification;
 
@@ -35,7 +33,6 @@ class Contact {
       note: data['note']?.toString() ?? '',
       contactDate: DateTime.tryParse(data['contact_date']?.toString() ?? ''),
       contactTime: data['contact_time']?.toString() ?? '',
-      contactProduct: data['contact_product']?.toString() ?? '',
       contactQuality: data['contact_quality']?.toString() ?? '',
       contactNotification: DateTime.tryParse(
         data['contact_notification']?.toString() ?? '',

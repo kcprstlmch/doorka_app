@@ -637,22 +637,20 @@ const _contactStatuses = [
   ContactStatus('no_contact', 'Brak kontaktu', Color(0xFF8A8F98)),
 ];
 
-const _products = [
-  'PV + ME',
-  'ME',
-  'UPSELL',
-  'Dach',
-  'Pompa ciepła',
-  'Turbina Wiatrowa',
-  'Czyste Powietrze',
-];
-
 const _qualities = ['S', 'M', 'L', 'XL'];
 const _followUpQuickTerms = [
   _QuickTerm('Za tydzień', Duration(days: 7)),
   _QuickTerm('Za miesiąc', Duration(days: 30)),
   _QuickTerm('Za 3 miesiące', Duration(days: 90)),
 ];
+
+bool _isMeetingStatus(String status) {
+  return status == 'scheduled_meeting' ||
+      status == 'meeting_active' ||
+      status == 'meeting_done' ||
+      status == 'signed_contract' ||
+      status == 'postponed';
+}
 
 const _notInterestedReasons = [
   'Cena',
@@ -687,6 +685,15 @@ String _timeOnly(TimeOfDay time) {
   final hour = time.hour.toString().padLeft(2, '0');
   final minute = time.minute.toString().padLeft(2, '0');
   return '$hour:$minute';
+}
+
+TimeOfDay _timeOfDayFromText(String value) {
+  final parts = value.split(':');
+  if (parts.length < 2) return const TimeOfDay(hour: 18, minute: 0);
+  return TimeOfDay(
+    hour: int.tryParse(parts[0]) ?? 18,
+    minute: int.tryParse(parts[1]) ?? 0,
+  );
 }
 
 String _shortDate(DateTime date) {
@@ -821,7 +828,6 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isLeadDayStarted = false;
   bool _isLeadDayPaused = false;
   bool _areTomorrowMeetingsCollapsed = false;
-  bool _showAllRecentContacts = false;
   bool _isWeeklyTileExpanded = true;
   int _sessionScheduledMeetings = 0;
   int _sessionCollectedContacts = 0;
@@ -1023,7 +1029,6 @@ class _DashboardPageState extends State<DashboardPage> {
       _dashboardFuture = _fetchDashboardData();
       if (status == 'scheduled_meeting') {
         _sessionScheduledMeetings++;
-        _sessionCollectedContacts++;
       } else if (status == 'to_visit') {
         _sessionCollectedContacts++;
       }
@@ -1072,9 +1077,28 @@ class _DashboardPageState extends State<DashboardPage> {
     _reload();
   }
 
+  Future<void> _editDashboardMeetingTime(Contact contact) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _timeOfDayFromText(contact.contactTime),
+    );
+    if (picked == null) return;
+
+    await _supabase
+        .from('contacts')
+        .update({
+          'contact_time': _timeOnly(picked),
+          'meeting_time': _timeOnly(picked),
+        })
+        .eq('id', contact.id);
+
+    _reload();
+  }
+
   @override
   Widget build(BuildContext context) {
-    return _PageShell(
+    return SafeArea(
+      top: false,
       child: FutureBuilder<_DashboardData>(
         future: _dashboardFuture,
         builder: (context, snapshot) {
@@ -1093,18 +1117,18 @@ class _DashboardPageState extends State<DashboardPage> {
           final data =
               snapshot.data ??
               const _DashboardData(contacts: [], clients: [], leadSessions: []);
-          final tomorrow = DateTime.now().add(const Duration(days: 1));
           final today = DateTime.now();
-          final workingContacts = data.contacts
-              .where((contact) => contact.status == 'quick_contact')
-              .toList();
-          final todayMeetings = data.contacts.where((contact) {
-            return (contact.status == 'scheduled_meeting' ||
-                    contact.status == 'meeting_active' ||
-                    contact.status == 'postponed') &&
-                contact.contactDate != null &&
-                _isSameDay(contact.contactDate!, today);
-          }).toList()..sort((a, b) => a.contactTime.compareTo(b.contactTime));
+          final scheduledMeetings =
+              data.contacts.where((contact) {
+                return _isMeetingStatus(contact.status) &&
+                    contact.status != 'signed_contract';
+              }).toList()..sort((a, b) {
+                final aDate = a.contactDate ?? DateTime(9999);
+                final bDate = b.contactDate ?? DateTime(9999);
+                final dateCompare = aDate.compareTo(bDate);
+                if (dateCompare != 0) return dateCompare;
+                return a.contactTime.compareTo(b.contactTime);
+              });
           final overdueMeetings = data.contacts.where((contact) {
             if (contact.status != 'scheduled_meeting' ||
                 contact.contactDate == null) {
@@ -1118,19 +1142,13 @@ class _DashboardPageState extends State<DashboardPage> {
             final todayOnly = DateTime(today.year, today.month, today.day);
             return contactDay.isBefore(todayOnly);
           }).toList();
-          final tomorrowMeetings = data.contacts.where((contact) {
-            return contact.status == 'scheduled_meeting' &&
-                contact.contactDate != null &&
-                _isSameDay(contact.contactDate!, tomorrow);
-          }).toList()..sort((a, b) => a.contactTime.compareTo(b.contactTime));
+          final collectedContacts = data.contacts
+              .where((contact) => !_isMeetingStatus(contact.status))
+              .toList();
 
-          final recentContacts = data.contacts.take(6).toList();
-          final visibleTomorrowMeetings = _areTomorrowMeetingsCollapsed
+          final visibleCollectedContacts = _areTomorrowMeetingsCollapsed
               ? <Contact>[]
-              : tomorrowMeetings;
-          final visibleRecentContacts = _showAllRecentContacts
-              ? <Contact>[]
-              : recentContacts.take(3).toList();
+              : collectedContacts;
           final weeklyStats = _buildWeeklyDashboardStats(data);
 
           return RefreshIndicator(
@@ -1152,88 +1170,89 @@ class _DashboardPageState extends State<DashboardPage> {
                       onStart: _startLeadDay,
                       onScheduleMeeting: () =>
                           _openLeadContactForm('scheduled_meeting'),
+                      onAddLead: () => _openLeadContactForm('quick_contact'),
                     );
                   },
                 ),
                 if (_isLeadDayStarted) ...[
                   const SizedBox(height: 10),
-                  _LeadDayActions(
-                    isPaused: _isLeadDayPaused,
-                    onQuickContact: () => _openLeadContactForm('quick_contact'),
-                    onVisitLater: () => _openLeadContactForm('to_visit'),
-                    onCallLater: () => _openLeadContactForm('to_call'),
-                    onQuickNote: _addQuickNote,
-                    onSaveArea: () {},
-                    onPause: _pauseLeadDay,
-                    onResume: _resumeLeadDay,
-                    onFinish: _finishLeadDay,
-                  ),
-                ],
-                if (workingContacts.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _WorkingContactsList(
-                    contacts: workingContacts,
-                    onDelete: _deleteDashboardContact,
+                  _DashboardBodyPadding(
+                    child: _LeadDayActions(
+                      isPaused: _isLeadDayPaused,
+                      onQuickContact: () =>
+                          _openLeadContactForm('quick_contact'),
+                      onVisitLater: () => _openLeadContactForm('to_visit'),
+                      onCallLater: () => _openLeadContactForm('to_call'),
+                      onQuickNote: _addQuickNote,
+                      onSaveArea: () {},
+                      onPause: _pauseLeadDay,
+                      onResume: _resumeLeadDay,
+                      onFinish: _finishLeadDay,
+                    ),
                   ),
                 ],
                 if (_quickNotes.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  _QuickNotesList(
-                    notes: _quickNotes,
-                    onDelete: _deleteQuickNote,
+                  _DashboardBodyPadding(
+                    child: _QuickNotesList(
+                      notes: _quickNotes,
+                      onDelete: _deleteQuickNote,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
-                _DashboardList(
-                  title: 'Dzień sprzedażowy',
-                  emptyText: 'Brak spotkań na dziś.',
-                  contacts: todayMeetings,
-                  leadingIcon: Icons.handshake_outlined,
-                  onDelete: _deleteDashboardContact,
+                _DashboardBodyPadding(
+                  child: _DashboardList(
+                    title: 'Umówione spotkania',
+                    headerTrailing:
+                        scheduledMeetings.isEmpty ||
+                            scheduledMeetings.first.contactDate == null
+                        ? null
+                        : '${_shortDate(scheduledMeetings.first.contactDate!)} | ${_weekdayNameFull(scheduledMeetings.first.contactDate!)}',
+                    emptyText: 'Brak umówionych spotkań.',
+                    contacts: scheduledMeetings,
+                    leadingIcon: Icons.handshake_outlined,
+                    onDelete: _deleteDashboardContact,
+                    onEditMeetingTime: _editDashboardMeetingTime,
+                  ),
                 ),
                 if (overdueMeetings.isNotEmpty) ...[
                   const SizedBox(height: 16),
-                  _DashboardList(
-                    title: 'Zaległe / wymaga akcji',
-                    emptyText: 'Brak zaległych spotkań.',
-                    contacts: overdueMeetings,
-                    leadingIcon: Icons.priority_high_outlined,
-                    accentColor: appDanger,
-                    onDelete: _deleteDashboardContact,
+                  _DashboardBodyPadding(
+                    child: _DashboardList(
+                      title: 'Zaległe / wymaga akcji',
+                      emptyText: 'Brak zaległych spotkań.',
+                      contacts: overdueMeetings,
+                      leadingIcon: Icons.priority_high_outlined,
+                      accentColor: appDanger,
+                      onDelete: _deleteDashboardContact,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
-                _DashboardList(
-                  title: 'Umówione na jutro',
-                  emptyText: 'Brak spotkań na jutro.',
-                  contacts: visibleTomorrowMeetings,
-                  leadingIcon: Icons.event_available_outlined,
-                  onDelete: _deleteDashboardContact,
-                  showExpandAction: true,
-                  isExpanded: !_areTomorrowMeetingsCollapsed,
-                  onToggleExpanded: () => setState(
-                    () => _areTomorrowMeetingsCollapsed =
-                        !_areTomorrowMeetingsCollapsed,
+                _DashboardBodyPadding(
+                  child: _DashboardList(
+                    title: 'Zebrane kontakty',
+                    emptyText: 'Brak zebranych kontaktów.',
+                    contacts: visibleCollectedContacts,
+                    leadingIcon: Icons.event_available_outlined,
+                    onDelete: _deleteDashboardContact,
+                    showExpandAction: true,
+                    isExpanded: !_areTomorrowMeetingsCollapsed,
+                    onToggleExpanded: () => setState(
+                      () => _areTomorrowMeetingsCollapsed =
+                          !_areTomorrowMeetingsCollapsed,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
-                _DashboardList(
-                  title: 'Ostatnio dodane kontakty',
-                  emptyText: 'Brak ostatnio dodanych kontaktów.',
-                  contacts: visibleRecentContacts,
-                  onDelete: _deleteDashboardContact,
-                  showExpandAction: true,
-                  isExpanded: !_showAllRecentContacts,
-                  onToggleExpanded: () => setState(
-                    () => _showAllRecentContacts = !_showAllRecentContacts,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                _WeeklyDashboardTile(
-                  stats: weeklyStats,
-                  isExpanded: _isWeeklyTileExpanded,
-                  onToggleExpanded: () => setState(
-                    () => _isWeeklyTileExpanded = !_isWeeklyTileExpanded,
+                _DashboardBodyPadding(
+                  child: _WeeklyDashboardTile(
+                    stats: weeklyStats,
+                    isExpanded: _isWeeklyTileExpanded,
+                    onToggleExpanded: () => setState(
+                      () => _isWeeklyTileExpanded = !_isWeeklyTileExpanded,
+                    ),
                   ),
                 ),
               ],
@@ -1370,6 +1389,7 @@ class _ActiveDashboardTile extends StatelessWidget {
     required this.currentContacts,
     required this.onStart,
     required this.onScheduleMeeting,
+    required this.onAddLead,
   });
 
   final DateTime today;
@@ -1381,11 +1401,11 @@ class _ActiveDashboardTile extends StatelessWidget {
   final int currentContacts;
   final VoidCallback onStart;
   final VoidCallback onScheduleMeeting;
+  final VoidCallback onAddLead;
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
       child: Stack(
         children: [
           Positioned.fill(
@@ -1399,14 +1419,10 @@ class _ActiveDashboardTile extends StatelessWidget {
             ),
           ),
           Positioned.fill(
-            child: Container(color: appWorkDark.withValues(alpha: 0.55)),
+            child: Container(color: appWorkDark.withValues(alpha: 0.70)),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-            decoration: BoxDecoration(
-              border: Border.all(color: appSurface.withValues(alpha: 0.06)),
-              borderRadius: BorderRadius.circular(8),
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 40),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -1466,7 +1482,10 @@ class _ActiveDashboardTile extends StatelessWidget {
                 const SizedBox(width: 14),
                 _LeadTimerControls(isStarted: isStarted, onStart: onStart),
                 if (isStarted)
-                  _ActiveScheduleButton(onPressed: onScheduleMeeting),
+                  _ActiveLeadButtons(
+                    onScheduleMeeting: onScheduleMeeting,
+                    onAddLead: onAddLead,
+                  ),
               ],
             ),
           ),
@@ -1476,32 +1495,89 @@ class _ActiveDashboardTile extends StatelessWidget {
   }
 }
 
-class _ActiveScheduleButton extends StatelessWidget {
-  const _ActiveScheduleButton({required this.onPressed});
+class _DashboardBodyPadding extends StatelessWidget {
+  const _DashboardBodyPadding({required this.child});
 
-  final VoidCallback onPressed;
+  final Widget child;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 70,
-      height: 70,
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: child,
+    );
+  }
+}
+
+class _ActiveLeadButtons extends StatelessWidget {
+  const _ActiveLeadButtons({
+    required this.onScheduleMeeting,
+    required this.onAddLead,
+  });
+
+  final VoidCallback onScheduleMeeting;
+  final VoidCallback onAddLead;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _ActiveLeadButton(
+          label: 'Umów spotkanie',
+          icon: Icons.event_available_outlined,
+          onPressed: onScheduleMeeting,
+          filled: true,
+        ),
+        const SizedBox(height: 6),
+        _ActiveLeadButton(
+          label: 'Dodaj kontakt',
+          icon: Icons.person_add_alt_1_outlined,
+          onPressed: onAddLead,
+        ),
+      ],
+    );
+  }
+}
+
+class _ActiveLeadButton extends StatelessWidget {
+  const _ActiveLeadButton({
+    required this.label,
+    required this.icon,
+    required this.onPressed,
+    this.filled = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final VoidCallback onPressed;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final backgroundColor = filled ? appSuccess : appSurface;
+    final foregroundColor = filled ? appSurface : appTextPrimary;
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minWidth: 92, maxWidth: 118),
       child: FilledButton(
         style: FilledButton.styleFrom(
-          backgroundColor: appSuccess,
-          foregroundColor: appSurface,
-          padding: EdgeInsets.zero,
-          shape: const CircleBorder(),
+          backgroundColor: backgroundColor,
+          foregroundColor: foregroundColor,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
         onPressed: onPressed,
-        child: const Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.event_available_outlined, size: 22),
-            SizedBox(height: 2),
+            Icon(icon, size: 18, color: foregroundColor),
+            const SizedBox(height: 2),
             Text(
-              'Umów',
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
             ),
           ],
         ),
@@ -1620,25 +1696,25 @@ class _LeadDayActions extends StatelessWidget {
   Widget build(BuildContext context) {
     final actions = [
       _LeadDayAction(
-        Icons.person_add_alt_1_outlined,
-        'Roboczy',
+        Icons.person_add_alt_1_rounded,
+        'Roboczo',
         appInfo,
         onQuickContact,
       ),
       _LeadDayAction(
-        Icons.directions_walk_outlined,
-        'Podjechać',
+        Icons.directions_walk_rounded,
+        'Podjedź',
         appWarning,
         onVisitLater,
       ),
       _LeadDayAction(
-        Icons.phone_forwarded_outlined,
-        'Zadzwonić',
+        Icons.phone_forwarded_rounded,
+        'Zadzwoń',
         const Color(0xFF7B61FF),
         onCallLater,
       ),
       _LeadDayAction(
-        Icons.edit_note_outlined,
+        Icons.edit_note_rounded,
         'Notatka',
         const Color(0xFF8A6F20),
         onQuickNote,
@@ -1654,7 +1730,7 @@ class _LeadDayActions extends StatelessWidget {
         ),
       ] else
         _LeadDayAction(
-          Icons.pause_rounded,
+          Icons.stop_rounded,
           'Przerwa',
           appDanger,
           onPause,
@@ -1662,14 +1738,11 @@ class _LeadDayActions extends StatelessWidget {
         ),
     ];
 
-    return Column(
+    return Row(
       children: [
         for (var index = 0; index < actions.length; index++) ...[
-          SizedBox(
-            width: double.infinity,
-            child: _LeadDayActionButton(action: actions[index]),
-          ),
-          if (index != actions.length - 1) const SizedBox(height: 8),
+          Expanded(child: _LeadDayActionButton(action: actions[index])),
+          if (index != actions.length - 1) const SizedBox(width: 6),
         ],
       ],
     );
@@ -1683,34 +1756,19 @@ class _LeadDayActionButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      height: 76,
-      child: OutlinedButton(
-        style: OutlinedButton.styleFrom(
-          backgroundColor: action.filled ? action.color : appSurface,
-          foregroundColor: action.filled ? appSurface : appTextPrimary,
-          side: BorderSide(color: action.color, width: 1.5),
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        onPressed: action.onPressed,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              action.icon,
-              size: 20,
-              color: action.filled ? appSurface : action.color,
-            ),
-            const SizedBox(height: 5),
-            Text(
-              action.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        backgroundColor: action.color,
+        foregroundColor: appSurface,
+        fixedSize: const Size(45, 45),
+        side: BorderSide(color: action.color, width: 1.5),
+        padding: EdgeInsets.zero,
+        shape: const CircleBorder(),
+      ),
+      onPressed: action.onPressed,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [Icon(action.icon, size: 27, color: appSurface)],
       ),
     );
   }
@@ -1779,80 +1837,85 @@ class _WeeklyDashboardTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: appSurface,
-        border: Border.all(color: appBorderStrong),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'W tym tygodniu',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'W tym tygodniu',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
               ),
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: appTextPrimary,
-                  minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 2),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                onPressed: onToggleExpanded,
-                icon: Icon(
-                  isExpanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  size: 18,
-                ),
-                iconAlignment: IconAlignment.end,
-                label: Text(
-                  isExpanded ? 'Zwiń' : 'Rozwiń',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
+            ),
+            TextButton.icon(
+              style: TextButton.styleFrom(
+                foregroundColor: appTextPrimary,
+                minimumSize: Size.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-            ],
-          ),
-          if (isExpanded) ...[
-            const SizedBox(height: 10),
-            Text(
-              stats.processedContracts.value.toString(),
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 2),
-            _WeekComparisonText(
-              currentValue: stats.processedContracts.value,
-              previousValue: stats.processedContracts.previousValue,
-              prefix: 'Umowy przeprocesowane',
-            ),
-            const SizedBox(height: 12),
-            IntrinsicHeight(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Expanded(
-                    child: _WeekMetricBox(metric: stats.processedContracts),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(child: _WeekMetricBox(metric: stats.meetings)),
-                  const SizedBox(width: 6),
-                  Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
-                ],
+              onPressed: onToggleExpanded,
+              icon: Icon(
+                isExpanded
+                    ? Icons.keyboard_arrow_up
+                    : Icons.keyboard_arrow_down,
+                size: 18,
+              ),
+              iconAlignment: IconAlignment.end,
+              label: Text(
+                isExpanded ? 'Zwiń' : 'Rozwiń',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
           ],
+        ),
+        if (isExpanded) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: appSurface,
+              border: Border.all(color: appBorderStrong),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  stats.processedContracts.value.toString(),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                _WeekComparisonText(
+                  currentValue: stats.processedContracts.value,
+                  previousValue: stats.processedContracts.previousValue,
+                  prefix: 'Umowy przeprocesowane',
+                ),
+                const SizedBox(height: 12),
+                IntrinsicHeight(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: _WeekMetricBox(metric: stats.processedContracts),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(child: _WeekMetricBox(metric: stats.meetings)),
+                      const SizedBox(width: 6),
+                      Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
-      ),
+      ],
     );
   }
 }
@@ -1976,6 +2039,8 @@ class _DashboardList extends StatelessWidget {
     required this.emptyText,
     required this.contacts,
     required this.onDelete,
+    this.headerTrailing,
+    this.onEditMeetingTime,
     this.leadingIcon,
     this.accentColor = appBrand,
     this.showExpandAction = false,
@@ -1984,9 +2049,11 @@ class _DashboardList extends StatelessWidget {
   });
 
   final String title;
+  final String? headerTrailing;
   final String emptyText;
   final List<Contact> contacts;
   final ValueChanged<Contact> onDelete;
+  final ValueChanged<Contact>? onEditMeetingTime;
   final IconData? leadingIcon;
   final Color accentColor;
   final bool showExpandAction;
@@ -1995,69 +2062,136 @@ class _DashboardList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: appSurface,
-        border: Border.all(color: appBorderStrong),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              if (leadingIcon != null) ...[
-                Icon(leadingIcon, color: accentColor, size: 21),
-                const SizedBox(width: 8),
-              ],
-              Expanded(
-                child: Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+    final useSplitMeetingTiles = onEditMeetingTime != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (leadingIcon != null) ...[
+              Icon(leadingIcon, color: accentColor, size: 21),
+              const SizedBox(width: 8),
+            ],
+            Expanded(
+              child: Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+            if (headerTrailing != null) ...[
+              const SizedBox(width: 8),
+              Text(
+                headerTrailing!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: appTextSecondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              if (showExpandAction)
-                TextButton.icon(
-                  style: TextButton.styleFrom(
-                    foregroundColor: appBrand,
-                    minimumSize: const Size(0, 36),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  ),
-                  onPressed: onToggleExpanded,
-                  icon: Icon(
-                    isExpanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    size: 18,
-                  ),
-                  iconAlignment: IconAlignment.end,
-                  label: Text(
-                    isExpanded ? 'Zwiń' : 'Rozwiń',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ),
             ],
-          ),
-          if (!showExpandAction || isExpanded) ...[
-            const SizedBox(height: 10),
-            if (contacts.isEmpty)
-              Text(emptyText, style: const TextStyle(color: appTextSecondary))
-            else
-              for (var index = 0; index < contacts.length; index++) ...[
-                if (index > 0)
-                  const Divider(height: 10, thickness: 1, color: appBorder),
-                _RecentContactTile(
-                  contact: contacts[index],
-                  onDelete: () => onDelete(contacts[index]),
+            if (showExpandAction)
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: appBrand,
+                  minimumSize: const Size(0, 36),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
-              ],
+                onPressed: onToggleExpanded,
+                icon: Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  size: 18,
+                ),
+                iconAlignment: IconAlignment.end,
+                label: Text(
+                  isExpanded ? 'Zwiń' : 'Rozwiń',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
           ],
+        ),
+        if (!showExpandAction || isExpanded) ...[
+          const SizedBox(height: 10),
+          if (useSplitMeetingTiles)
+            Container(
+              decoration: BoxDecoration(
+                color: appSurface,
+                border: Border.all(color: appBorderStrong),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (contacts.isEmpty)
+                    SizedBox(
+                      width: double.infinity,
+                      child: Text(
+                        emptyText,
+                        style: const TextStyle(color: appTextSecondary),
+                      ),
+                    )
+                  else
+                    for (var index = 0; index < contacts.length; index++) ...[
+                      if (index > 0)
+                        const Divider(
+                          height: 10,
+                          thickness: 1,
+                          color: appBorder,
+                        ),
+                      _RecentContactTile(
+                        contact: contacts[index],
+                        onDelete: () => onDelete(contacts[index]),
+                        onEditMeetingTime: () =>
+                            onEditMeetingTime!(contacts[index]),
+                      ),
+                    ],
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                color: appSurface,
+                border: Border.all(color: appBorderStrong),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (contacts.isEmpty)
+                    SizedBox(
+                      width: double.infinity,
+                      child: Text(
+                        emptyText,
+                        style: const TextStyle(color: appTextSecondary),
+                      ),
+                    )
+                  else
+                    for (var index = 0; index < contacts.length; index++) ...[
+                      if (index > 0)
+                        const Divider(
+                          height: 10,
+                          thickness: 1,
+                          color: appBorder,
+                        ),
+                      _RecentContactTile(
+                        contact: contacts[index],
+                        onDelete: () => onDelete(contacts[index]),
+                      ),
+                    ],
+                ],
+              ),
+            ),
         ],
-      ),
+      ],
     );
   }
 }
@@ -2113,137 +2247,6 @@ class _QuickNotesList extends StatelessWidget {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-class _WorkingContactsList extends StatelessWidget {
-  const _WorkingContactsList({required this.contacts, required this.onDelete});
-
-  final List<Contact> contacts;
-  final ValueChanged<Contact> onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: appSurface,
-        border: Border.all(color: appBorderStrong),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.work_outline, color: appInfo, size: 21),
-              const SizedBox(width: 8),
-              Text(
-                'Robocze',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          for (var index = 0; index < contacts.length; index++) ...[
-            if (index > 0) const Divider(height: 10, color: appBorder),
-            _WorkingContactTile(
-              contact: contacts[index],
-              onDelete: () => onDelete(contacts[index]),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _WorkingContactTile extends StatelessWidget {
-  const _WorkingContactTile({required this.contact, required this.onDelete});
-
-  final Contact contact;
-  final VoidCallback onDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final title = contact.contactName.isEmpty
-        ? (contact.phone.isEmpty ? 'Kontakt roboczy' : contact.phone)
-        : contact.contactName;
-    final subtitle = [
-      if (contact.phone.isNotEmpty && title != contact.phone) contact.phone,
-      if (contact.address.isNotEmpty) contact.address,
-      if (contact.note.isNotEmpty) contact.note,
-    ].join(' | ');
-
-    return Dismissible(
-      key: ValueKey('dashboard-working-contact-${contact.id}'),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          color: appDanger,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Icon(Icons.delete_outline, color: appSurface),
-      ),
-      onDismissed: (_) => onDelete(),
-      child: Material(
-        color: appSurfaceSoft,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => showContactDetailsSheet(context, contact),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 17,
-                  backgroundColor: appInfo.withValues(alpha: 0.12),
-                  foregroundColor: appInfo,
-                  child: Text(
-                    _initials(title),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      if (subtitle.isNotEmpty)
-                        Text(
-                          subtitle,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: appTextSecondary),
-                        ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Usuń roboczy',
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.close),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -2322,13 +2325,26 @@ class _BurstItem {
 }
 
 class _RecentContactTile extends StatelessWidget {
-  const _RecentContactTile({required this.contact, required this.onDelete});
+  const _RecentContactTile({
+    required this.contact,
+    required this.onDelete,
+    this.onEditMeetingTime,
+  });
 
   final Contact contact;
   final VoidCallback onDelete;
+  final VoidCallback? onEditMeetingTime;
 
   @override
   Widget build(BuildContext context) {
+    final isMeeting = _isMeetingStatus(contact.status);
+    final useMeetingLayout = isMeeting && onEditMeetingTime != null;
+    final trailingText = isMeeting
+        ? (contact.contactTime.length >= 5
+              ? contact.contactTime.substring(0, 5)
+              : contact.contactTime)
+        : _statusByValue(contact.status).label;
+
     return Dismissible(
       key: ValueKey('dashboard-contact-${contact.id}'),
       direction: DismissDirection.endToStart,
@@ -2342,65 +2358,91 @@ class _RecentContactTile extends StatelessWidget {
         child: const Icon(Icons.delete_outline, color: appSurface),
       ),
       onDismissed: (_) => onDelete(),
-      child: Material(
-        color: appSurfaceSoft,
+      child: useMeetingLayout
+          ? _MeetingDashboardTileContent(
+              contact: contact,
+              timeText: trailingText,
+              onEditMeetingTime: onEditMeetingTime,
+            )
+          : _ContactDashboardTileContent(
+              contact: contact,
+              trailingText: trailingText,
+            ),
+    );
+  }
+}
+
+class _MeetingDashboardTileContent extends StatelessWidget {
+  const _MeetingDashboardTileContent({
+    required this.contact,
+    required this.timeText,
+    required this.onEditMeetingTime,
+  });
+
+  final Contact contact;
+  final String timeText;
+  final VoidCallback? onEditMeetingTime;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: appSurfaceSoft,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
         borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () => showContactDetailsSheet(context, contact),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: appBrandSoft,
-                  foregroundColor: appBrand,
+        onTap: () => showContactDetailsSheet(context, contact),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: onEditMeetingTime,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 3,
+                  ),
                   child: Text(
-                    _initials(contact.contactName),
+                    timeText,
                     style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
+                      color: appBrand,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        contact.contactName.isEmpty
-                            ? 'Bez nazwy'
-                            : contact.contactName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        _dashboardContactSubtitle(context, contact),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: appTextSecondary,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _DashboardContactText(
+                  contact: contact,
+                  titleFontSize: 15,
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  _statusByValue(contact.status).label,
-                  style: const TextStyle(
-                    color: appBrand,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+              ),
+              const SizedBox(width: 8),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Nawiguj',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: contact.address.isEmpty
+                        ? null
+                        : () => _openMap(context, contact.address),
+                    icon: const Icon(Icons.home_outlined),
                   ),
-                ),
-              ],
-            ),
+                  IconButton(
+                    tooltip: 'Zadzwoń',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: contact.phone.isEmpty
+                        ? null
+                        : () => _callPhone(context, contact.phone),
+                    icon: const Icon(Icons.phone_outlined),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -2408,7 +2450,99 @@ class _RecentContactTile extends StatelessWidget {
   }
 }
 
+class _ContactDashboardTileContent extends StatelessWidget {
+  const _ContactDashboardTileContent({
+    required this.contact,
+    required this.trailingText,
+  });
+
+  final Contact contact;
+  final String trailingText;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: appSurfaceSoft,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: () => showContactDetailsSheet(context, contact),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
+            children: [
+              CircleAvatar(
+                radius: 18,
+                backgroundColor: appBrandSoft,
+                foregroundColor: appBrand,
+                child: Text(
+                  _initials(contact.contactName),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(child: _DashboardContactText(contact: contact)),
+              const SizedBox(width: 8),
+              Text(
+                trailingText,
+                style: const TextStyle(
+                  color: appBrand,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DashboardContactText extends StatelessWidget {
+  const _DashboardContactText({required this.contact, this.titleFontSize});
+
+  final Contact contact;
+  final double? titleFontSize;
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = _dashboardContactSubtitle(context, contact);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          contact.contactName.isEmpty ? 'Bez nazwy' : contact.contactName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: appTextPrimary,
+            fontWeight: FontWeight.w900,
+          ).copyWith(fontSize: titleFontSize),
+        ),
+        if (subtitle.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: appTextSecondary, fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 String _dashboardContactSubtitle(BuildContext context, Contact contact) {
+  if (_isMeetingStatus(contact.status)) {
+    return contact.note;
+  }
+
   final parts = <String>[];
   if (contact.contactDate != null && contact.contactTime.isNotEmpty) {
     parts.add(_displayDateTime(contact.contactDate!, contact.contactTime));
@@ -2422,7 +2556,7 @@ String _dashboardContactSubtitle(BuildContext context, Contact contact) {
   }
   if (contact.address.isNotEmpty) parts.add(contact.address);
   if (contact.note.isNotEmpty) parts.add(contact.note);
-  return parts.isEmpty ? 'Brak dodatkowych informacji' : parts.join(' | ');
+  return parts.join(' | ');
 }
 
 class ClientsPage extends StatefulWidget {
@@ -3517,6 +3651,7 @@ class _ContactsPageState extends State<ContactsPage> {
 
     return (data as List)
         .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
+        .where((contact) => !_isMeetingStatus(contact.status))
         .toList();
   }
 
@@ -3554,7 +3689,7 @@ class _ContactsPageState extends State<ContactsPage> {
       'phone': contact.phone,
       'correspondence_address': contact.address,
       'installation_address': contact.address,
-      'product_name': contact.contactProduct,
+      'product_name': '',
       'contract_signed_at': _dateOnly(DateTime.now()),
       'execution_method': 'finansowanie',
       'status': 'signed_contract',
@@ -4251,26 +4386,14 @@ class _ContactTileState extends State<_ContactTile> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  _ContactStatusPill(status: status),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Text(
-                                      contact.contactName.isEmpty
-                                          ? 'Bez nazwy'
-                                          : contact.contactName,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .titleMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
-                                    ),
-                                  ),
-                                ],
+                              Text(
+                                contact.contactName.isEmpty
+                                    ? 'Bez nazwy'
+                                    : contact.contactName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                               const SizedBox(height: 4),
                               if (subtitle.isNotEmpty)
@@ -4392,7 +4515,6 @@ class _ContactTileState extends State<_ContactTile> {
         contact.contactTime.isNotEmpty) {
       final parts = [
         _displayDateTime(contact.contactDate!, contact.contactTime),
-        if (contact.contactProduct.isNotEmpty) contact.contactProduct,
         if (contact.contactQuality.isNotEmpty) contact.contactQuality,
       ];
       return parts.join(' | ');
@@ -4530,7 +4652,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
   late String _status;
   late DateTime _contactDate;
   late TimeOfDay _contactTime;
-  late String _contactProduct;
   String? _contactQuality;
   DateTime? _contactNotification;
   bool _isSaving = false;
@@ -4550,9 +4671,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     _contactDate =
         contact.contactDate ?? DateTime.now().add(const Duration(days: 1));
     _contactTime = _timeOfDayFromText(contact.contactTime);
-    _contactProduct = contact.contactProduct.isEmpty
-        ? _products.first
-        : contact.contactProduct;
     _contactQuality = contact.contactQuality.isEmpty
         ? null
         : contact.contactQuality;
@@ -4582,7 +4700,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         'contact_date': null,
         'contact_time': null,
         'meeting_time': null,
-        'contact_product': null,
         'contact_quality': null,
         'contact_notification': null,
       };
@@ -4592,7 +4709,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
           'contact_date': _dateOnly(_contactDate),
           'contact_time': _timeOnly(_contactTime),
           'meeting_time': _timeOnly(_contactTime),
-          'contact_product': _contactProduct,
           'contact_quality': _contactQuality,
         });
       }
@@ -4669,7 +4785,6 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
       'contact_date': _dateOnly(date),
       'contact_time': _timeOnly(_contactTime),
       'meeting_time': _timeOnly(_contactTime),
-      'contact_product': _contactProduct,
       'contact_quality': _contactQuality,
       'contact_notification': null,
       'note': _mergeNote(
@@ -4800,7 +4915,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         'phone': _phoneController.text.trim(),
         'correspondence_address': _addressController.text.trim(),
         'installation_address': _addressController.text.trim(),
-        'product_name': _contactProduct,
+        'product_name': '',
         'contract_signed_at': _dateOnly(DateTime.now()),
         'execution_method': 'finansowanie',
         'status': 'signed_contract',
@@ -4858,13 +4973,8 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     });
   }
 
-  String _mergeNote(String entry) {
-    final existing = _noteController.text.trim();
-    final timestamp =
-        '${_shortDate(DateTime.now())} ${_timeOnly(TimeOfDay.now())}';
-    final next = '[$timestamp] $entry';
-    if (existing.isEmpty) return next;
-    return '$existing\n$next';
+  String _mergeNote(String _) {
+    return _noteController.text.trim();
   }
 
   TimeOfDay _timeOfDayFromText(String value) {
@@ -5066,14 +5176,9 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
               _MeetingFields(
                 date: _contactDate,
                 time: _contactTime,
-                product: _contactProduct,
                 quality: _contactQuality,
                 onPickDate: _pickContactDate,
                 onPickTime: _pickContactTime,
-                onProductChanged: (value) {
-                  if (value == null) return;
-                  setState(() => _contactProduct = value);
-                },
                 onQualityChanged: (value) {
                   setState(() => _contactQuality = value);
                 },
@@ -7286,7 +7391,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
   late String _status;
   DateTime _contactDate = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _contactTime = const TimeOfDay(hour: 18, minute: 0);
-  String _contactProduct = _products.first;
   String? _contactQuality;
   DateTime? _contactNotification = DateTime.now().add(const Duration(days: 7));
   bool _isSaving = false;
@@ -7334,7 +7438,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
           'contact_date': _dateOnly(_contactDate),
           'contact_time': _timeOnly(_contactTime),
           'meeting_time': _timeOnly(_contactTime),
-          'contact_product': _contactProduct,
           'contact_quality': _contactQuality,
         });
       }
@@ -7450,7 +7553,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
 
   String get _formHint {
     return switch (_status) {
-      'scheduled_meeting' => 'Minimum: dane kontaktu, adres, dzień i produkt.',
+      'scheduled_meeting' => 'Minimum: dane kontaktu, adres i dzień.',
       'to_visit' => 'Minimum: dane kontaktu, adres i ogólny termin.',
       'to_call' => 'Wybierz termin, żeby aplikacja przypomniała o telefonie.',
       'quick_contact' => 'To nie jest lead. Wystarczy telefon albo adres.',
@@ -7538,14 +7641,9 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 _MeetingFields(
                   date: _contactDate,
                   time: _contactTime,
-                  product: _contactProduct,
                   quality: _contactQuality,
                   onPickDate: _pickContactDate,
                   onPickTime: _pickContactTime,
-                  onProductChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _contactProduct = value);
-                  },
                   onQualityChanged: (value) {
                     setState(() => _contactQuality = value);
                   },
@@ -7604,7 +7702,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
               const SizedBox(height: 20),
               FilledButton(
                 onPressed: _isSaving ? null : _save,
-                child: Text(_isSaving ? 'Zapisuję...' : 'Zapisz kontakt'),
+                child: Text(_isSaving ? 'Umawiam...' : 'Umów spotkanie'),
               ),
             ],
           ),
@@ -7618,21 +7716,17 @@ class _MeetingFields extends StatelessWidget {
   const _MeetingFields({
     required this.date,
     required this.time,
-    required this.product,
     required this.quality,
     required this.onPickDate,
     required this.onPickTime,
-    required this.onProductChanged,
     required this.onQualityChanged,
   });
 
   final DateTime date;
   final TimeOfDay time;
-  final String product;
   final String? quality;
   final VoidCallback onPickDate;
   final VoidCallback onPickTime;
-  final ValueChanged<String?> onProductChanged;
   final ValueChanged<String?> onQualityChanged;
 
   @override
@@ -7657,16 +7751,6 @@ class _MeetingFields extends StatelessWidget {
               ),
             ),
           ],
-        ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: product,
-          decoration: const InputDecoration(labelText: 'Produkt'),
-          items: [
-            for (final item in _products)
-              DropdownMenuItem(value: item, child: Text(item)),
-          ],
-          onChanged: onProductChanged,
         ),
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(

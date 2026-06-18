@@ -48,7 +48,6 @@ alter table public.contacts
   add column if not exists contact_date date,
   add column if not exists contact_time time,
   add column if not exists meeting_time time,
-  add column if not exists contact_product text,
   add column if not exists contact_quality text,
   add column if not exists contact_notification timestamptz,
   add column if not exists meeting_started_at timestamptz,
@@ -62,6 +61,9 @@ alter table public.contacts
   add column if not exists moved_to_client_at timestamptz,
   add column if not exists created_at timestamptz not null default now(),
   add column if not exists updated_at timestamptz not null default now();
+
+alter table public.contacts
+  drop column if exists contact_product;
 
 create table if not exists public.clients (
   id uuid primary key default gen_random_uuid()
@@ -415,7 +417,6 @@ alter table public.contacts
   add column if not exists contact_date date,
   add column if not exists contact_time time,
   add column if not exists meeting_time time,
-  add column if not exists contact_product text,
   add column if not exists contact_quality text,
   add column if not exists contact_notification timestamptz,
   add column if not exists archived_at timestamptz,
@@ -498,7 +499,6 @@ set
   contact_date = current_date + ((floor(random() * 14)::int) + 1),
   contact_time = make_time((9 + floor(random() * 11)::int), (ARRAY[0, 15, 30, 45])[1 + floor(random() * 4)::int], 0),
   meeting_time = make_time((9 + floor(random() * 11)::int), (ARRAY[0, 15, 30, 45])[1 + floor(random() * 4)::int], 0),
-  contact_product = coalesce(contact_product, (ARRAY['PV + ME', 'ME', 'UPSELL', 'Dach', 'Pompa ciepła', 'Turbina Wiatrowa', 'Czyste Powietrze'])[1 + floor(random() * 7)::int]),
   contact_quality = coalesce(contact_quality, (ARRAY['S', 'M', 'L', 'XL'])[1 + floor(random() * 4)::int])
 where status = 'signed_contract';
 
