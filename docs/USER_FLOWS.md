@@ -8,6 +8,20 @@ Proces dodawania kontaktu będzie najprawdopodobniej dostępny głównie przez P
 Istniejąca aplikacja webowa w `/Users/kacstelmach/crm` jest używana jako techniczna referencja dla działających procesów, ale nowe procesy Fluttera muszą być zgodne z aktualną dokumentacją.
 
 ## Sekcje aplikacji
+Aktualny glowny przeplyw aplikacji opiera sie na trzech pierwszych sekcjach:
+- Kontakty / Zebrane leady
+- Umowione spotkania
+- W realizacji
+
+Rekord moze przechodzic:
+- z `Kontakty` do `Umowione spotkania`,
+- z `Umowione spotkania` do `Kontakty`,
+- z `Umowione spotkania` do `W realizacji`,
+- z `W realizacji` do `Umowione spotkania`.
+
+Nie przechodzimy bezposrednio z `Kontakty` do `W realizacji`.
+Nie przechodzimy bezposrednio z `W realizacji` do `Kontakty`.
+
 Szczegółowe procesy dla głównych sekcji znajdują się w:
 - Dashboard: `docs/sections/Dashboard.md`
 - Kontakty: `docs/sections/Contacts.md`
@@ -23,21 +37,11 @@ Aplikacja nie pokazuje po zakończeniu połączenia pytania o zmianę statusu an
 Przy adresie klienta albo kontaktu aplikacja ma mieć przycisk otwarcia zewnętrznej mapy.
 Agent może dzięki temu uruchomić nawigację bez ręcznego wpisywania adresu.
 
-## Archiwizacja kontaktu
-Agent może przenieść kontakt do archiwum.
-Przed archiwizacją aplikacja pokazuje popup z pytaniem, czy agent na pewno chce przenieść kontakt do archiwum.
-Po potwierdzeniu kontakt znika z aktywnej listy kontaktów i trafia do archiwum.
+## Usuwanie kontaktu
+Agent może usunąć kontakt z listy.
+Przed usunięciem aplikacja pokazuje popup z pytaniem, czy agent na pewno chce wykonać tę akcję.
+Po potwierdzeniu kontakt znika z aktywnej listy kontaktów.
 
-## Usuwanie permanentne z archiwum
-Agent może usuwać dane permanentnie z archiwum.
-Przed trwałym usunięciem aplikacja pokazuje ostrzeżenie, że danych nie będzie można przywrócić.
-Agent może zaznaczyć, które kontakty chce usunąć permanentnie, a które zostawić w archiwum.
-
-## Archiwum klientów
-Archiwum klientów działa podobnie jak archiwum kontaktów.
-Trwałe usunięcie klienta wymaga potwierdzenia i komunikatu, że danych nie będzie można przywrócić.
-Trwałe usuwanie jest możliwe tylko z archiwum.
-Potwierdzenie trwałego usunięcia odbywa się przez popup, bez wpisywania słowa USUŃ.
 
 ## Usunięcie konta
 Agent może sam usunąć konto po potwierdzeniu przez e-mail.
@@ -48,7 +52,13 @@ Technicznie konto może mieć 30 dni karencji w bazie danych, ale agent nie powi
 Na ekranie logowania ma być opcja Nie pamiętasz hasła?.
 Reset hasła dotyczy kont zakładanych przez e-mail i hasło.
 Agent wpisuje swój e-mail, a system wysyła wiadomość z resetem hasła.
-Reset hasła nie dotyczy użytkowników logujących się przez Google.
+
+## Rejestracja
+Agent może samodzielnie utworzyć konto w aplikacji.
+Na teraz do rejestracji konta wymagane są tylko e-mail i hasło.
+Nie wymagamy imienia, nazwiska, telefonu ani innych danych profilu na etapie rejestracji.
+Po założeniu konta aplikacja pokazuje informację, że na adres e-mail został wysłany link aktywacyjny.
+Agent kończy rejestrację przez wejście w link aktywacyjny z wiadomości e-mail.
 
 ## Przypomnienia
 Spotkanie nie tworzy domyślnie przypomnienia.

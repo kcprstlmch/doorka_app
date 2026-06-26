@@ -97,7 +97,6 @@ Moze zapisywac:
 - start spotkania,
 - zakonczenie spotkania,
 - przelozenie,
-- archiwizacje,
 - przeniesienie do W realizacji.
 
 ## RLS

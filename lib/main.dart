@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' show File;
 
 import 'package:flutter/foundation.dart';
@@ -33,8 +34,22 @@ SupabaseClient get _supabase => Supabase.instance.client;
 final List<Map<String, dynamic>> _localLeadSessions = [];
 final ValueNotifier<String?> _avatarPathNotifier = ValueNotifier<String?>(null);
 final ValueNotifier<int> _defaultLeadGoalNotifier = ValueNotifier<int>(9);
+final ValueNotifier<int> _authRefreshNotifier = ValueNotifier<int>(0);
+final ValueNotifier<int> _unprocessedMeetingsNotifier = ValueNotifier<int>(0);
+final ValueNotifier<List<ContactStatus>> _customContactStatusesNotifier =
+    ValueNotifier<List<ContactStatus>>([]);
 const _avatarPathPreferenceKey = 'doorka.avatar_path';
 const _defaultLeadGoalPreferenceKey = 'doorka.default_lead_goal';
+const _customContactStatusesPreferenceKey = 'doorka.custom_contact_statuses';
+const _rememberLoginPreferenceKey = 'doorka.remember_login';
+const _rememberedEmailPreferenceKey = 'doorka.remembered_email';
+const _rememberedPasswordPreferenceKey = 'doorka.remembered_password';
+const _leadDayStartedAtPreferenceKey = 'doorka.lead_day_started_at';
+const _leadDayBreakStartedAtPreferenceKey = 'doorka.lead_day_break_started_at';
+const _leadDayBreakSecondsPreferenceKey = 'doorka.lead_day_break_seconds';
+const _manualRefreshTimeout = Duration(seconds: 20);
+
+void _ignoreManualRefreshError(Object error) {}
 
 class DoorkaApp extends StatelessWidget {
   const DoorkaApp({super.key});
@@ -59,19 +74,20 @@ class AuthGate extends StatefulWidget {
 
 class _AuthGateState extends State<AuthGate> {
   late final StreamSubscription<AuthState> _authSubscription;
+  late final VoidCallback _authRefreshListener;
   Session? _session;
-  bool _profileSyncing = true;
 
   @override
   void initState() {
     super.initState();
     _session = _supabase.auth.currentSession;
+    _authRefreshListener = _refreshAuthState;
+    _authRefreshNotifier.addListener(_authRefreshListener);
     _syncCurrentProfile();
     _authSubscription = _supabase.auth.onAuthStateChange.listen((state) {
       if (!mounted) return;
       setState(() {
         _session = state.session;
-        _profileSyncing = state.session != null;
       });
       _syncCurrentProfile();
     });
@@ -79,34 +95,43 @@ class _AuthGateState extends State<AuthGate> {
 
   @override
   void dispose() {
+    _authRefreshNotifier.removeListener(_authRefreshListener);
     _authSubscription.cancel();
     super.dispose();
+  }
+
+  void _refreshAuthState() {
+    if (!mounted) return;
+    setState(() {
+      _session = _supabase.auth.currentSession;
+    });
+    _syncCurrentProfile();
   }
 
   Future<void> _syncCurrentProfile() async {
     final user = _supabase.auth.currentUser;
     if (user == null) {
-      if (mounted) {
-        setState(() => _profileSyncing = false);
-      }
       return;
     }
 
     final email = user.email?.toLowerCase();
     final metadata = user.userMetadata ?? <String, dynamic>{};
-    final fullName = metadata['full_name'] ?? metadata['name'];
+    final fullName = metadata['full_name'] ?? metadata['name'] ?? email;
     final avatarUrl = metadata['avatar_url'] ?? metadata['picture'];
 
-    await _supabase.from('profiles').upsert({
-      'id': user.id,
-      'email': email,
-      'full_name': fullName,
-      'avatar_path': avatarUrl,
-      'role': email == _adminEmail ? 'admin' : 'agent',
-    });
-
-    if (mounted) {
-      setState(() => _profileSyncing = false);
+    try {
+      await _supabase
+          .from('profiles')
+          .upsert({
+            'id': user.id,
+            'email': email,
+            'full_name': fullName,
+            'avatar_path': avatarUrl,
+            'role': email == _adminEmail ? 'admin' : 'agent',
+          })
+          .timeout(const Duration(seconds: 5));
+    } catch (_) {
+      // Profil nie może blokować wejścia do aplikacji.
     }
   }
 
@@ -114,10 +139,6 @@ class _AuthGateState extends State<AuthGate> {
   Widget build(BuildContext context) {
     if (_session == null) {
       return const AuthScreen();
-    }
-
-    if (_profileSyncing) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     return const HomeScreen();
@@ -134,12 +155,29 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _signUpEmailController = TextEditingController();
+  final _signUpPasswordController = TextEditingController();
+  final _signUpConfirmPasswordController = TextEditingController();
+  final _resetEmailController = TextEditingController();
   bool _isLoading = false;
+  bool _rememberMe = false;
+  int _authStep = 0;
+  int _previousAuthStep = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRememberedCredentials();
+  }
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _signUpEmailController.dispose();
+    _signUpPasswordController.dispose();
+    _signUpConfirmPasswordController.dispose();
+    _resetEmailController.dispose();
     super.dispose();
   }
 
@@ -160,13 +198,38 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  Future<void> _signInWithGoogle() {
-    return _runAuthAction(() async {
-      await _supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: kIsWeb ? null : _mobileRedirectUrl,
-      );
+  Future<void> _loadRememberedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shouldRemember = prefs.getBool(_rememberLoginPreferenceKey) ?? false;
+    if (!mounted || !shouldRemember) return;
+
+    setState(() {
+      _rememberMe = true;
+      _emailController.text =
+          prefs.getString(_rememberedEmailPreferenceKey) ?? '';
+      _passwordController.text =
+          prefs.getString(_rememberedPasswordPreferenceKey) ?? '';
     });
+  }
+
+  Future<void> _saveRememberedCredentials() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_rememberLoginPreferenceKey, _rememberMe);
+
+    if (_rememberMe) {
+      await prefs.setString(
+        _rememberedEmailPreferenceKey,
+        _emailController.text.trim(),
+      );
+      await prefs.setString(
+        _rememberedPasswordPreferenceKey,
+        _passwordController.text,
+      );
+      return;
+    }
+
+    await prefs.remove(_rememberedEmailPreferenceKey);
+    await prefs.remove(_rememberedPasswordPreferenceKey);
   }
 
   Future<void> _signInWithEmail() {
@@ -175,27 +238,50 @@ class _AuthScreenState extends State<AuthScreen> {
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
+      await _saveRememberedCredentials();
     });
   }
 
   Future<void> _signUpWithEmail() {
     return _runAuthAction(() async {
+      final email = _signUpEmailController.text.trim();
+      final password = _signUpPasswordController.text;
+      final confirmPassword = _signUpConfirmPasswordController.text;
+
+      if (email.isEmpty || password.isEmpty) {
+        _showMessage('Uzupełnij e-mail i hasło.');
+        return;
+      }
+
+      if (password != confirmPassword) {
+        _showMessage('Hasła muszą być takie same.');
+        return;
+      }
+
       await _supabase.auth.signUp(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+        email: email,
+        password: password,
         emailRedirectTo: kIsWeb ? null : _mobileRedirectUrl,
+        data: {'full_name': email.split('@').first},
       );
-      _showMessage('Sprawdź skrzynkę e-mail, aby dokończyć rejestrację.');
+      _goToAuthStep(2);
     });
   }
 
   Future<void> _resetPassword() {
     return _runAuthAction(() async {
+      final email = _resetEmailController.text.trim();
+      if (email.isEmpty) {
+        _showMessage('Wpisz e-mail do resetu hasła.');
+        return;
+      }
+
       await _supabase.auth.resetPasswordForEmail(
-        _emailController.text.trim(),
+        email,
         redirectTo: kIsWeb ? null : _mobileRedirectUrl,
       );
       _showMessage('Wysłaliśmy link do zmiany hasła.');
+      _goToAuthStep(0);
     });
   }
 
@@ -206,143 +292,221 @@ class _AuthScreenState extends State<AuthScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _goToAuthStep(int step) {
+    if (_authStep == step) return;
+    setState(() {
+      _previousAuthStep = _authStep;
+      _authStep = step;
+    });
+  }
+
+  Widget _buildAuthStep() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 260),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) {
+        final isForward = _authStep >= _previousAuthStep;
+        final begin = Offset(isForward ? 1 : -1, 0);
+        final slideAnimation = Tween<Offset>(
+          begin: begin,
+          end: Offset.zero,
+        ).animate(animation);
+        return SlideTransition(
+          position: slideAnimation,
+          child: FadeTransition(opacity: animation, child: child),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey(_authStep),
+        child: switch (_authStep) {
+          1 => _buildSignUpForm(),
+          2 => _buildActivationInfo(),
+          3 => _buildResetPasswordForm(),
+          _ => _buildLoginForm(),
+        },
+      ),
+    );
+  }
+
+  int _previousStepForCurrentStep() {
+    return switch (_authStep) {
+      2 => 1,
+      _ => 0,
+    };
+  }
+
+  Widget _buildLoginForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email],
+          decoration: const InputDecoration(labelText: 'E-mail'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _passwordController,
+          obscureText: true,
+          autofillHints: const [AutofillHints.password],
+          decoration: const InputDecoration(labelText: 'Hasło'),
+        ),
+        CheckboxListTile(
+          value: _rememberMe,
+          onChanged: _isLoading
+              ? null
+              : (value) {
+                  setState(() => _rememberMe = value ?? false);
+                },
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          title: const Text('Zapamiętaj mnie'),
+        ),
+        FilledButton(
+          onPressed: _isLoading ? null : _signInWithEmail,
+          child: const Text('Zaloguj'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton(
+          onPressed: _isLoading ? null : () => _goToAuthStep(1),
+          child: const Text('Utwórz konto'),
+        ),
+        TextButton(
+          onPressed: _isLoading ? null : () => _goToAuthStep(3),
+          child: const Text('Nie pamiętasz hasła?'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSignUpForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _signUpEmailController,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email],
+          decoration: const InputDecoration(labelText: 'E-mail'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _signUpPasswordController,
+          obscureText: true,
+          autofillHints: const [AutofillHints.newPassword],
+          decoration: const InputDecoration(labelText: 'Hasło'),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _signUpConfirmPasswordController,
+          obscureText: true,
+          autofillHints: const [AutofillHints.newPassword],
+          decoration: const InputDecoration(labelText: 'Potwierdź hasło'),
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _isLoading ? null : _signUpWithEmail,
+          child: const Text('Zarejestruj się'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(
+          onPressed: _isLoading ? null : () => _goToAuthStep(0),
+          child: const Text('Zaloguj się'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivationInfo() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Aby dokończyć rejestrację konta na Twój adres e-mail został wysłany link aktywacyjny, dokończ rejestrację poprzez wejście na ten link.',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: appTextPrimary,
+            fontSize: 14,
+            fontWeight: FontWeight.normal,
+            height: 1.35,
+          ),
+        ),
+        const SizedBox(height: 18),
+        FilledButton(
+          onPressed: _isLoading ? null : () => _goToAuthStep(0),
+          child: const Text('Wróć do logowania'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildResetPasswordForm() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _resetEmailController,
+          keyboardType: TextInputType.emailAddress,
+          autofillHints: const [AutofillHints.email],
+          decoration: const InputDecoration(labelText: 'E-mail'),
+        ),
+        const SizedBox(height: 16),
+        FilledButton(
+          onPressed: _isLoading ? null : _resetPassword,
+          child: const Text('Przypomnij hasło'),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Image.asset('assets/images/d2d-door-ka-logo.png', height: 72),
-                  const SizedBox(height: 36),
-                  _GoogleSignInButton(
-                    onPressed: _isLoading ? null : _signInWithGoogle,
+        child: Stack(
+          children: [
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Image.asset(
+                        'assets/images/d2d-door-ka-logo.png',
+                        height: 72,
+                      ),
+                      const SizedBox(height: 36),
+                      _buildAuthStep(),
+                      if (_isLoading) ...[
+                        const SizedBox(height: 16),
+                        const Center(child: CircularProgressIndicator()),
+                      ],
+                    ],
                   ),
-                  const SizedBox(height: 28),
-                  TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    autofillHints: const [AutofillHints.email],
-                    decoration: const InputDecoration(labelText: 'E-mail'),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _passwordController,
-                    obscureText: true,
-                    autofillHints: const [AutofillHints.password],
-                    decoration: const InputDecoration(labelText: 'Hasło'),
-                  ),
-                  const SizedBox(height: 16),
-                  FilledButton(
-                    onPressed: _isLoading ? null : _signInWithEmail,
-                    child: const Text('Zaloguj'),
-                  ),
-                  const SizedBox(height: 8),
-                  OutlinedButton(
-                    onPressed: _isLoading ? null : _signUpWithEmail,
-                    child: const Text('Utwórz konto'),
-                  ),
-                  TextButton(
-                    onPressed: _isLoading ? null : _resetPassword,
-                    child: const Text('Nie pamiętasz hasła?'),
-                  ),
-                  if (_isLoading) ...[
-                    const SizedBox(height: 16),
-                    const Center(child: CircularProgressIndicator()),
-                  ],
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _GoogleSignInButton extends StatelessWidget {
-  const _GoogleSignInButton({required this.onPressed});
-
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      height: 52,
-      child: OutlinedButton(
-        onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: const Color(0xFF3C4043),
-          side: const BorderSide(color: Color(0xFFDADCE0)),
-          textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        ),
-        child: const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _GoogleMark(),
-            SizedBox(width: 12),
-            Text('Kontynuuj z Google'),
+            if (_authStep != 0)
+              Positioned(
+                top: 4,
+                left: 4,
+                child: IconButton(
+                  tooltip: 'Wróć',
+                  onPressed: _isLoading
+                      ? null
+                      : () => _goToAuthStep(_previousStepForCurrentStep()),
+                  icon: const Icon(Icons.arrow_back),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
-}
-
-class _GoogleMark extends StatelessWidget {
-  const _GoogleMark();
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 22,
-      height: 22,
-      child: CustomPaint(painter: _GoogleMarkPainter()),
-    );
-  }
-}
-
-class _GoogleMarkPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final strokeWidth = size.width * 0.18;
-    final rect = Offset.zero & size;
-    final paint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-
-    paint.color = const Color(0xFF4285F4);
-    canvas.drawArc(rect.deflate(strokeWidth / 2), -0.08, 1.38, false, paint);
-
-    paint.color = const Color(0xFF34A853);
-    canvas.drawArc(rect.deflate(strokeWidth / 2), 1.30, 1.55, false, paint);
-
-    paint.color = const Color(0xFFFBBC05);
-    canvas.drawArc(rect.deflate(strokeWidth / 2), 2.85, 1.25, false, paint);
-
-    paint.color = const Color(0xFFEA4335);
-    canvas.drawArc(rect.deflate(strokeWidth / 2), 4.10, 1.45, false, paint);
-
-    paint.color = const Color(0xFF4285F4);
-    final y = size.height * 0.52;
-    canvas.drawLine(
-      Offset(size.width * 0.52, y),
-      Offset(size.width * 0.94, y),
-      paint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class HomeScreen extends StatefulWidget {
@@ -355,6 +519,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
   int _contactsRefresh = 0;
+  int _seenUnprocessedMeetingsCount = 0;
 
   @override
   void initState() {
@@ -364,9 +529,64 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadSavedAvatarPath() async {
     final preferences = await SharedPreferences.getInstance();
-    _avatarPathNotifier.value = preferences.getString(_avatarPathPreferenceKey);
+    await preferences.remove(_avatarPathPreferenceKey);
+    _avatarPathNotifier.value = null;
     _defaultLeadGoalNotifier.value =
         preferences.getInt(_defaultLeadGoalPreferenceKey) ?? 9;
+    await _loadCustomContactStatuses();
+    await _refreshUnprocessedMeetingsCount();
+  }
+
+  void _openAccountPanel() {
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        transitionDuration: const Duration(milliseconds: 260),
+        reverseTransitionDuration: const Duration(milliseconds: 220),
+        pageBuilder: (context, animation, secondaryAnimation) {
+          return const Scaffold(
+            backgroundColor: appBackground,
+            body: AccountPage(),
+          );
+        },
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          final curvedAnimation = CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          );
+          return SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(1, 0),
+              end: Offset.zero,
+            ).animate(curvedAnimation),
+            child: child,
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _openUnprocessedMeetingsPanel() async {
+    setState(() {
+      _seenUnprocessedMeetingsCount = _unprocessedMeetingsNotifier.value;
+    });
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.18),
+      builder: (context) {
+        return const Align(
+          alignment: Alignment.topRight,
+          child: Padding(
+            padding: EdgeInsets.only(top: 70, right: 12, left: 12),
+            child: Material(
+              color: Colors.transparent,
+              child: _UnprocessedMeetingsPopup(),
+            ),
+          ),
+        );
+      },
+    );
+    await _refreshUnprocessedMeetingsCount();
   }
 
   @override
@@ -374,9 +594,9 @@ class _HomeScreenState extends State<HomeScreen> {
     final pages = [
       const DashboardPage(),
       ContactsPage(refreshSignal: _contactsRefresh),
+      const MeetingsPage(),
       ClientsPage(onContactRestored: () => setState(() => _contactsRefresh++)),
       const StatisticsPage(),
-      const AccountPage(),
     ];
 
     return Scaffold(
@@ -389,15 +609,23 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         actions: [
           Padding(
+            padding: const EdgeInsets.only(right: 2),
+            child: ValueListenableBuilder<int>(
+              valueListenable: _unprocessedMeetingsNotifier,
+              builder: (context, count, _) {
+                return _TopNotificationsButton(
+                  hasPending: count > _seenUnprocessedMeetingsCount,
+                  onPressed: _openUnprocessedMeetingsPanel,
+                );
+              },
+            ),
+          ),
+          Padding(
             padding: const EdgeInsets.only(right: 6),
             child: IconButton(
-              tooltip: 'Powiadomienia',
-              onPressed: () {},
-              icon: const Badge(
-                smallSize: 8,
-                backgroundColor: Color(0xFFE53935),
-                child: Icon(Icons.notifications_none, size: 25),
-              ),
+              tooltip: 'Konto',
+              onPressed: _openAccountPanel,
+              icon: const _TopAccountAvatar(),
             ),
           ),
         ],
@@ -409,6 +637,128 @@ class _HomeScreenState extends State<HomeScreen> {
         currentIndex: _currentIndex,
         onDestinationSelected: (index) => setState(() => _currentIndex = index),
       ),
+    );
+  }
+}
+
+class _TopNotificationsButton extends StatefulWidget {
+  const _TopNotificationsButton({
+    required this.hasPending,
+    required this.onPressed,
+  });
+
+  final bool hasPending;
+  final VoidCallback onPressed;
+
+  @override
+  State<_TopNotificationsButton> createState() =>
+      _TopNotificationsButtonState();
+}
+
+class _TopNotificationsButtonState extends State<_TopNotificationsButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _shake;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 680),
+    );
+    _shake = TweenSequence<double>([
+      TweenSequenceItem(tween: Tween(begin: 0, end: -0.10), weight: 1),
+      TweenSequenceItem(tween: Tween(begin: -0.10, end: 0.10), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 0.10, end: -0.08), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: -0.08, end: 0.08), weight: 2),
+      TweenSequenceItem(tween: Tween(begin: 0.08, end: 0), weight: 1),
+    ]).animate(CurvedAnimation(parent: _controller, curve: Curves.easeInOut));
+    if (widget.hasPending) _controller.repeat(reverse: false);
+  }
+
+  @override
+  void didUpdateWidget(covariant _TopNotificationsButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.hasPending && !_controller.isAnimating) {
+      _controller.repeat(reverse: false);
+    } else if (!widget.hasPending && _controller.isAnimating) {
+      _controller.stop();
+      _controller.reset();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          tooltip: 'Powiadomienia',
+          onPressed: widget.onPressed,
+          icon: AnimatedBuilder(
+            animation: _shake,
+            builder: (context, child) {
+              return Transform.rotate(angle: _shake.value, child: child);
+            },
+            child: const Icon(Icons.notifications_none_outlined),
+          ),
+        ),
+        if (widget.hasPending)
+          Positioned(
+            right: 10,
+            top: 10,
+            child: Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: appDanger,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _TopAccountAvatar extends StatelessWidget {
+  const _TopAccountAvatar();
+
+  @override
+  Widget build(BuildContext context) {
+    final user = _supabase.auth.currentUser;
+    return ValueListenableBuilder<String?>(
+      valueListenable: _avatarPathNotifier,
+      builder: (context, avatarPath, _) {
+        return Container(
+          width: 30,
+          height: 30,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF2F0EA),
+            shape: BoxShape.circle,
+            border: Border.all(color: appBorder),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: avatarPath == null || avatarPath.isEmpty
+              ? Text(
+                  _userInitials(user),
+                  style: const TextStyle(
+                    color: appTextSecondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                  ),
+                )
+              : _AvatarImage(path: avatarPath),
+        );
+      },
     );
   }
 }
@@ -434,6 +784,11 @@ class _BottomNavBar extends StatelessWidget {
       label: 'Kontakty',
     ),
     _BottomNavItem(
+      icon: Icons.event_available_outlined,
+      selectedIcon: Icons.event_available,
+      label: 'Umówione',
+    ),
+    _BottomNavItem(
       icon: Icons.precision_manufacturing_outlined,
       selectedIcon: Icons.precision_manufacturing,
       label: 'W realizacji',
@@ -442,11 +797,6 @@ class _BottomNavBar extends StatelessWidget {
       icon: Icons.bar_chart_outlined,
       selectedIcon: Icons.bar_chart,
       label: 'Statystyka',
-    ),
-    _BottomNavItem(
-      icon: Icons.person_outline,
-      selectedIcon: Icons.person,
-      label: 'Konto',
     ),
   ];
 
@@ -603,6 +953,7 @@ class _AvatarImage extends StatelessWidget {
         width: double.infinity,
         height: double.infinity,
         fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
       );
     }
 
@@ -611,53 +962,467 @@ class _AvatarImage extends StatelessWidget {
       width: double.infinity,
       height: double.infinity,
       fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
     );
   }
 }
 
 class ContactStatus {
-  const ContactStatus(this.value, this.label, this.color);
+  const ContactStatus(
+    this.value,
+    this.label,
+    this.color, {
+    required this.stage,
+    this.icon,
+    this.isSystem = true,
+  });
 
   final String value;
   final String label;
   final Color color;
+  final String stage;
+  final IconData? icon;
+  final bool isSystem;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'value': value,
+      'label': label,
+      'color': color.toARGB32(),
+      'stage': stage,
+      'icon': icon?.codePoint,
+    };
+  }
+
+  static ContactStatus fromJson(Map<String, dynamic> json) {
+    return ContactStatus(
+      json['value']?.toString() ?? '',
+      json['label']?.toString() ?? '',
+      Color((json['color'] as num?)?.toInt() ?? 0xFF6D6A75),
+      stage: json['stage']?.toString() ?? 'contact',
+      icon: _contactStatusIconFromCodePoint((json['icon'] as num?)?.toInt()),
+      isSystem: false,
+    );
+  }
 }
 
 const _contactStatuses = [
-  ContactStatus('scheduled_meeting', 'Umówione spotkanie', Color(0xFF2F5D50)),
-  ContactStatus('meeting_active', 'Spotkanie trwa', Color(0xFF0F766E)),
-  ContactStatus('meeting_done', 'Spotkanie odbyte', Color(0xFF2374AB)),
-  ContactStatus('signed_contract', 'Spisana umowa', Color(0xFF1E8E3E)),
-  ContactStatus('interested', 'Zainteresowany', Color(0xFF5B7CFA)),
-  ContactStatus('contact', 'Kontakt', Color(0xFF6D6A75)),
-  ContactStatus('postponed', 'Przełożone', Color(0xFFB7791F)),
-  ContactStatus('not_interested', 'Niezainteresowany', Color(0xFFD64545)),
-  ContactStatus('no_contact', 'Brak kontaktu', Color(0xFF8A8F98)),
+  ContactStatus(
+    'scheduled_meeting',
+    'Umówione spotkanie',
+    Color(0xFF2F5D50),
+    stage: 'meeting',
+  ),
+  ContactStatus(
+    'meeting_active',
+    'Spotkanie trwa',
+    Color(0xFF0F766E),
+    stage: 'meeting',
+  ),
+  ContactStatus(
+    'meeting_done',
+    'Spotkanie odbyte',
+    Color(0xFF2374AB),
+    stage: 'meeting',
+  ),
+  ContactStatus(
+    'signed_contract',
+    'Spisana umowa',
+    Color(0xFF1E8E3E),
+    stage: 'meeting',
+  ),
+  ContactStatus(
+    'interested',
+    'Zainteresowany',
+    Color(0xFF5B7CFA),
+    stage: 'contact',
+  ),
+  ContactStatus('contact', 'Kontakt', Color(0xFF6D6A75), stage: 'contact'),
+  ContactStatus('postponed', 'Przełożone', Color(0xFFB7791F), stage: 'meeting'),
+  ContactStatus(
+    'not_interested',
+    'Niezainteresowany',
+    Color(0xFFD64545),
+    stage: 'contact',
+  ),
+  ContactStatus(
+    'no_contact',
+    'Brak kontaktu',
+    Color(0xFF8A8F98),
+    stage: 'contact',
+  ),
 ];
+
+const _defaultContactTypeStatus = ContactStatus(
+  'contact_type_default',
+  'Typ kontaktu',
+  Color(0xFF8A8F98),
+  stage: 'contact_type',
+);
+
+const _defaultEditableContactStatuses = [
+  ContactStatus(
+    'to_call',
+    'Do przedzwonienia',
+    Color(0xFF2374AB),
+    stage: 'contact',
+    icon: Icons.phone_outlined,
+  ),
+  ContactStatus(
+    'to_visit',
+    'Do podjechania',
+    Color(0xFFB7791F),
+    stage: 'contact',
+    icon: Icons.home_outlined,
+  ),
+  ContactStatus(
+    'working',
+    'Robocze',
+    Color(0xFF6D6A75),
+    stage: 'contact',
+    icon: Icons.edit_note_outlined,
+  ),
+];
+
+const _defaultEditableContactTypes = [
+  ContactStatus(
+    'contact_type_panels_storage',
+    'Panele z magazynem energii',
+    Color(0xFF2F5D50),
+    stage: 'contact_type',
+  ),
+  ContactStatus(
+    'contact_type_subsidy',
+    'Dofinansowanie',
+    Color(0xFF2374AB),
+    stage: 'contact_type',
+  ),
+  ContactStatus(
+    'contact_type_installation_expansion',
+    'Rozbudowa instalacji',
+    Color(0xFFB7791F),
+    stage: 'contact_type',
+  ),
+];
+
+const _statusPalette = [
+  Color(0xFF2F5D50),
+  Color(0xFF0F766E),
+  Color(0xFF2374AB),
+  Color(0xFF5B7CFA),
+  Color(0xFF7B61FF),
+  Color(0xFFB7791F),
+  Color(0xFFF0A202),
+  Color(0xFFD64545),
+  Color(0xFF6D6A75),
+  Color(0xFF2E2D2A),
+];
+
+const _contactStatusIconChoices = [
+  Icons.phone_outlined,
+  Icons.home_outlined,
+  Icons.edit_note_outlined,
+  Icons.schedule_outlined,
+  Icons.priority_high_outlined,
+  Icons.person_search_outlined,
+  Icons.handshake_outlined,
+  Icons.event_available_outlined,
+  Icons.warning_amber_rounded,
+  Icons.check_circle_outline,
+  Icons.close,
+  Icons.star_border_rounded,
+];
+
+IconData? _contactStatusIconFromCodePoint(int? codePoint) {
+  if (codePoint == null) return null;
+  for (final icon in _contactStatusIconChoices) {
+    if (icon.codePoint == codePoint) return icon;
+  }
+  return null;
+}
+
+Color _automaticStatusColor(String stage) {
+  final customCount = _customContactStatusesNotifier.value
+      .where((status) => status.stage == stage && !status.isSystem)
+      .length;
+  return _statusPalette[customCount % _statusPalette.length];
+}
 
 const _qualities = ['S', 'M', 'L', 'XL'];
 
+const _meetingStatuses = {
+  'scheduled_meeting',
+  'meeting_active',
+  'meeting_done',
+  'signed_contract',
+  'postponed',
+};
+
 bool _isMeetingStatus(String status) {
-  return status == 'scheduled_meeting' ||
-      status == 'meeting_active' ||
-      status == 'meeting_done' ||
-      status == 'signed_contract' ||
-      status == 'postponed';
+  return _meetingStatuses.contains(status) ||
+      _customContactStatusesNotifier.value.any(
+        (item) => item.value == status && item.stage == 'meeting',
+      );
 }
 
-const _notInterestedReasons = [
+bool _isUnprocessedMeeting(Contact contact) {
+  if (contact.status != 'scheduled_meeting' || contact.contactDate == null) {
+    return false;
+  }
+  final today = DateTime.now();
+  final todayOnly = DateTime(today.year, today.month, today.day);
+  final contactDay = DateTime(
+    contact.contactDate!.year,
+    contact.contactDate!.month,
+    contact.contactDate!.day,
+  );
+  return contactDay.isBefore(todayOnly);
+}
+
+bool _isCurrentOrUpcomingMeeting(Contact contact) {
+  if (!_isMeetingStatus(contact.status) ||
+      contact.status == 'signed_contract') {
+    return false;
+  }
+  return !_isUnprocessedMeeting(contact);
+}
+
+Future<void> _refreshUnprocessedMeetingsCount() async {
+  try {
+    final contacts = await _fetchActiveContacts();
+    _unprocessedMeetingsNotifier.value = contacts
+        .where(_isUnprocessedMeeting)
+        .length;
+  } catch (_) {
+    _unprocessedMeetingsNotifier.value = 0;
+  }
+}
+
+int _compareContactsByDateAndTime(
+  Contact a,
+  Contact b, {
+  required bool newestFirst,
+}) {
+  final fallback = newestFirst ? DateTime(1900) : DateTime(9999);
+  final aDate = a.contactDate ?? fallback;
+  final bDate = b.contactDate ?? fallback;
+  final dateCompare = newestFirst
+      ? bDate.compareTo(aDate)
+      : aDate.compareTo(bDate);
+  if (dateCompare != 0) return dateCompare;
+  return newestFirst
+      ? b.contactTime.compareTo(a.contactTime)
+      : a.contactTime.compareTo(b.contactTime);
+}
+
+List<Contact> _contactsFromSupabaseData(Object? data) {
+  return (data as List)
+      .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
+      .toList();
+}
+
+Future<List<Contact>> _fetchActiveContacts() async {
+  final data = await _supabase
+      .from('contacts')
+      .select()
+      .isFilter('moved_to_client_at', null);
+
+  return _contactsFromSupabaseData(data);
+}
+
+const _notSoldReasons = [
   'Cena',
-  'Musi przemyśleć',
   'Brak osoby decyzyjnej',
   'Nie teraz',
-  'Beton',
+  'Czeka na decyzję',
   'Inne',
 ];
 
 ContactStatus _statusByValue(String value) {
-  return _contactStatuses.firstWhere(
+  return [
+    ..._contactStatuses,
+    ..._customContactStatusesNotifier.value,
+  ].firstWhere(
     (status) => status.value == value,
     orElse: () => _contactStatuses.first,
+  );
+}
+
+List<ContactStatus> _statusesForStage(String stage) {
+  if (stage == 'contact') {
+    return _customContactStatusesNotifier.value
+        .where((status) => status.stage == stage)
+        .toList();
+  }
+
+  return [
+    ..._contactStatuses.where((status) => status.stage == stage),
+    ..._customContactStatusesNotifier.value.where(
+      (status) => status.stage == stage,
+    ),
+  ];
+}
+
+String _stageForContactStatus(String status) {
+  return _statusByValue(status).stage;
+}
+
+List<String> _contactTypeValuesFromRaw(String raw) {
+  return raw
+      .split(',')
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet()
+      .take(3)
+      .toList();
+}
+
+String _contactTypeValuesToRaw(List<String> values) {
+  return values
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet()
+      .take(3)
+      .join(',');
+}
+
+List<ContactStatus> _contactTypeStatusesFor(Contact contact) {
+  final rawTypes = contact.contactType.isNotEmpty
+      ? contact.contactType
+      : contact.contactQuality;
+  final values = _contactTypeValuesFromRaw(rawTypes);
+  final types = _statusesForStage('contact_type');
+  final statuses = <ContactStatus>[];
+
+  for (final value in values) {
+    for (final type in types) {
+      if (type.value == value) {
+        statuses.add(type);
+        break;
+      }
+    }
+  }
+
+  if (statuses.isEmpty) return [];
+  return statuses.take(3).toList();
+}
+
+Future<void> _loadCustomContactStatuses() async {
+  final preferences = await SharedPreferences.getInstance();
+  final raw = preferences.getString(_customContactStatusesPreferenceKey);
+  if (raw == null || raw.isEmpty) {
+    final seededStatuses = _seedDefaultEditableStatuses(const []);
+    await _saveCustomContactStatuses(seededStatuses);
+    return;
+  }
+
+  try {
+    final decoded = jsonDecode(raw) as List;
+    final loadedStatuses = decoded
+        .map((item) => ContactStatus.fromJson(Map<String, dynamic>.from(item)))
+        .where((status) => status.value.isNotEmpty && status.label.isNotEmpty)
+        .toList();
+    final seededStatuses = _seedDefaultEditableStatuses(loadedStatuses);
+    await _saveCustomContactStatuses(seededStatuses);
+  } catch (_) {
+    final seededStatuses = _seedDefaultEditableStatuses(const []);
+    await _saveCustomContactStatuses(seededStatuses);
+  }
+}
+
+List<ContactStatus> _seedDefaultEditableStatuses(List<ContactStatus> statuses) {
+  final normalizedStatuses = statuses.map(_normalizeEditableStatus).toList();
+  final nextStatuses = [...normalizedStatuses];
+
+  void addDefault(ContactStatus defaultStatus) {
+    final hasValue = nextStatuses.any(
+      (status) => status.value == defaultStatus.value,
+    );
+    final hasLabel = nextStatuses.any(
+      (status) =>
+          status.stage == defaultStatus.stage &&
+          _normalizedStatusLabel(status.label) ==
+              _normalizedStatusLabel(defaultStatus.label),
+    );
+    if (!hasValue && !hasLabel) nextStatuses.add(defaultStatus);
+  }
+
+  for (final status in _defaultEditableContactStatuses) {
+    addDefault(status);
+  }
+  for (final type in _defaultEditableContactTypes) {
+    addDefault(type);
+  }
+
+  return nextStatuses;
+}
+
+ContactStatus _normalizeEditableStatus(ContactStatus status) {
+  ContactStatus? matchingDefault;
+  for (final defaultStatus in [
+    ..._defaultEditableContactStatuses,
+    ..._defaultEditableContactTypes,
+  ]) {
+    if (defaultStatus.value == status.value) {
+      matchingDefault = defaultStatus;
+      break;
+    }
+  }
+
+  final normalizedLabel =
+      status.stage == 'contact_type' &&
+          _normalizedStatusLabel(status.label) == 'dotacja'
+      ? 'Dofinansowanie'
+      : status.label;
+
+  if (matchingDefault == null &&
+      normalizedLabel == status.label &&
+      status.icon != null) {
+    return status;
+  }
+
+  return ContactStatus(
+    status.value,
+    normalizedLabel,
+    status.color,
+    stage: status.stage,
+    icon: status.icon ?? matchingDefault?.icon,
+    isSystem: status.isSystem,
+  );
+}
+
+String _normalizedStatusLabel(String label) {
+  return label.trim().toLowerCase();
+}
+
+Future<void> _saveCustomContactStatuses(List<ContactStatus> statuses) async {
+  _customContactStatusesNotifier.value = statuses;
+  final preferences = await SharedPreferences.getInstance();
+  await preferences.setString(
+    _customContactStatusesPreferenceKey,
+    jsonEncode(statuses.map((status) => status.toJson()).toList()),
+  );
+}
+
+Future<void> _pushSettingsSubpage(BuildContext context, Widget page) {
+  return Navigator.of(context).push(
+    PageRouteBuilder<void>(
+      pageBuilder: (context, animation, secondaryAnimation) => page,
+      transitionsBuilder: (context, animation, secondaryAnimation, child) {
+        final curvedAnimation = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        );
+        return SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1, 0),
+            end: Offset.zero,
+          ).animate(curvedAnimation),
+          child: FadeTransition(opacity: curvedAnimation, child: child),
+        );
+      },
+    ),
   );
 }
 
@@ -809,52 +1574,57 @@ class _DashboardData {
   final List<Map<String, dynamic>> leadSessions;
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage>
+    with WidgetsBindingObserver {
   late Future<_DashboardData> _dashboardFuture;
   bool _isLeadDayStarted = false;
   bool _isLeadDayPaused = false;
-  bool _areTomorrowMeetingsCollapsed = false;
   bool _isWeeklyTileExpanded = true;
   int _sessionCollectedContacts = 0;
   Duration _leadDayElapsed = Duration.zero;
+  Duration _leadDayBreakElapsed = Duration.zero;
+  DateTime? _leadDayStartedAt;
+  DateTime? _leadDayBreakStartedAt;
   Timer? _leadDayTimer;
-  Timer? _leadDayBreakTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _dashboardFuture = _fetchDashboardData();
+    _restoreLeadDayTimer();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _leadDayTimer?.cancel();
-    _leadDayBreakTimer?.cancel();
     super.dispose();
   }
 
-  Future<_DashboardData> _fetchDashboardData() async {
-    final results = await Future.wait([
-      _supabase
-          .from('contacts')
-          .select()
-          .isFilter('archived_at', null)
-          .isFilter('moved_to_client_at', null),
-      _supabase.from('clients').select().isFilter('archived_at', null),
-      _fetchLeadSessionsForDashboard(),
-    ]);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshLeadDayElapsed();
+    }
+  }
 
-    final contacts = results[0]
-        .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
-        .toList();
-    final clients = results[1]
+  Future<_DashboardData> _fetchDashboardData() async {
+    final contacts = await _fetchActiveContacts();
+    final clientsData = await _supabase
+        .from('clients')
+        .select()
+        .isFilter('archived_at', null);
+    final leadSessions = await _fetchLeadSessionsForDashboard();
+
+    final clients = clientsData
         .map((item) => Client.fromMap(Map<String, dynamic>.from(item)))
         .toList();
 
     return _DashboardData(
       contacts: contacts,
       clients: clients,
-      leadSessions: results[2]
+      leadSessions: leadSessions
           .map((item) => Map<String, dynamic>.from(item))
           .toList(),
     );
@@ -869,22 +1639,209 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  void _reload() {
-    setState(() => _dashboardFuture = _fetchDashboardData());
+  Future<void> _reload() async {
+    try {
+      final data = await _fetchDashboardData().timeout(_manualRefreshTimeout);
+      if (!mounted) return;
+      setState(() => _dashboardFuture = Future.value(data));
+    } catch (error) {
+      if (!mounted) return;
+      _ignoreManualRefreshError(error);
+    }
   }
 
-  void _startLeadDay() {
+  void _updateDashboardContact(Contact updatedContact) {
+    final currentData = _dashboardFuture;
+    currentData.then((data) {
+      if (!mounted) return;
+      final nextContacts = data.contacts
+          .map(
+            (contact) =>
+                contact.id == updatedContact.id ? updatedContact : contact,
+          )
+          .where((contact) => contact.status != 'signed_contract')
+          .toList();
+      setState(() {
+        _dashboardFuture = Future.value(
+          _DashboardData(
+            contacts: nextContacts,
+            clients: data.clients,
+            leadSessions: data.leadSessions,
+          ),
+        );
+      });
+    });
+  }
+
+  Future<void> _restoreLeadDayTimer() async {
+    final preferences = await SharedPreferences.getInstance();
+    final startedAtText = preferences.getString(_leadDayStartedAtPreferenceKey);
+    final breakStartedAtText = preferences.getString(
+      _leadDayBreakStartedAtPreferenceKey,
+    );
+    final breakSeconds =
+        preferences.getInt(_leadDayBreakSecondsPreferenceKey) ?? 0;
+    final startedAt = DateTime.tryParse(startedAtText ?? '');
+    final breakStartedAt = DateTime.tryParse(breakStartedAtText ?? '');
+    if (!mounted || startedAt == null) return;
+
+    final baseBreakElapsed = Duration(seconds: breakSeconds);
+    final currentBreakElapsed = breakStartedAt == null
+        ? Duration.zero
+        : DateTime.now().difference(breakStartedAt);
+    final totalBreakElapsed = baseBreakElapsed + currentBreakElapsed;
+
+    setState(() {
+      _isLeadDayStarted = true;
+      _isLeadDayPaused = breakStartedAt != null;
+      _leadDayStartedAt = startedAt;
+      _leadDayBreakStartedAt = breakStartedAt;
+      _leadDayBreakElapsed = totalBreakElapsed;
+      _leadDayElapsed =
+          DateTime.now().difference(startedAt) - totalBreakElapsed;
+    });
+    _startLeadDayTicker();
+  }
+
+  void _refreshLeadDayElapsed() {
+    final startedAt = _leadDayStartedAt;
+    if (!mounted || !_isLeadDayStarted || startedAt == null) {
+      return;
+    }
+
+    final now = DateTime.now();
+    final currentBreakElapsed =
+        _isLeadDayPaused && _leadDayBreakStartedAt != null
+        ? now.difference(_leadDayBreakStartedAt!)
+        : Duration.zero;
+    final totalBreakElapsed = _leadDayBreakElapsed + currentBreakElapsed;
+    final workElapsed = now.difference(startedAt) - totalBreakElapsed;
+
+    setState(() {
+      if (_isLeadDayPaused) {
+        _leadDayElapsed = workElapsed.isNegative ? Duration.zero : workElapsed;
+      } else {
+        _leadDayElapsed = workElapsed.isNegative ? Duration.zero : workElapsed;
+      }
+    });
+  }
+
+  void _startLeadDayTicker() {
     _leadDayTimer?.cancel();
-    _leadDayBreakTimer?.cancel();
+    _leadDayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      _refreshLeadDayElapsed();
+    });
+  }
+
+  Future<void> _startLeadDay() async {
+    _leadDayTimer?.cancel();
+    final startedAt = DateTime.now();
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setString(
+      _leadDayStartedAtPreferenceKey,
+      startedAt.toIso8601String(),
+    );
+    await preferences.remove(_leadDayBreakStartedAtPreferenceKey);
+    await preferences.setInt(_leadDayBreakSecondsPreferenceKey, 0);
+    if (!mounted) return;
+
     setState(() {
       _isLeadDayStarted = true;
       _isLeadDayPaused = false;
+      _leadDayStartedAt = startedAt;
+      _leadDayBreakStartedAt = null;
+      _leadDayBreakElapsed = Duration.zero;
       _leadDayElapsed = Duration.zero;
       _sessionCollectedContacts = 0;
     });
-    _leadDayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted || _isLeadDayPaused) return;
-      setState(() => _leadDayElapsed += const Duration(seconds: 1));
+    _startLeadDayTicker();
+  }
+
+  Future<void> _toggleLeadDayBreak() async {
+    if (!_isLeadDayStarted) return;
+
+    final preferences = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+
+    if (_isLeadDayPaused) {
+      final breakStartedAt = _leadDayBreakStartedAt;
+      final breakDuration = breakStartedAt == null
+          ? Duration.zero
+          : now.difference(breakStartedAt);
+      final totalBreakElapsed = _leadDayBreakElapsed + breakDuration;
+
+      await preferences.setInt(
+        _leadDayBreakSecondsPreferenceKey,
+        totalBreakElapsed.inSeconds,
+      );
+      await preferences.remove(_leadDayBreakStartedAtPreferenceKey);
+
+      if (!mounted) return;
+      setState(() {
+        _isLeadDayPaused = false;
+        _leadDayBreakStartedAt = null;
+        _leadDayBreakElapsed = totalBreakElapsed;
+      });
+      _refreshLeadDayElapsed();
+      return;
+    }
+
+    await preferences.setString(
+      _leadDayBreakStartedAtPreferenceKey,
+      now.toIso8601String(),
+    );
+    if (!mounted) return;
+    setState(() {
+      _isLeadDayPaused = true;
+      _leadDayBreakStartedAt = now;
+    });
+    _refreshLeadDayElapsed();
+  }
+
+  Future<void> _finishLeadDay() async {
+    if (!_isLeadDayStarted) return;
+
+    final preferences = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+    final breakStartedAt = _leadDayBreakStartedAt;
+    final finalBreakElapsed =
+        _leadDayBreakElapsed +
+        (_isLeadDayPaused && breakStartedAt != null
+            ? now.difference(breakStartedAt)
+            : Duration.zero);
+    final workSeconds = _leadDayElapsed.inSeconds;
+
+    final session = {
+      'agent_id': _supabase.auth.currentUser?.id,
+      'session_date': _dateOnly(now),
+      'scheduled_meetings_count': 0,
+      'collected_contacts_count': _sessionCollectedContacts,
+      'work_seconds': workSeconds,
+      'break_seconds': finalBreakElapsed.inSeconds,
+      'created_at': now.toIso8601String(),
+    };
+
+    try {
+      await _supabase.from('lead_sessions').insert(session);
+    } catch (_) {
+      _localLeadSessions.add(session);
+    }
+
+    await preferences.remove(_leadDayStartedAtPreferenceKey);
+    await preferences.remove(_leadDayBreakStartedAtPreferenceKey);
+    await preferences.remove(_leadDayBreakSecondsPreferenceKey);
+
+    _leadDayTimer?.cancel();
+    if (!mounted) return;
+    setState(() {
+      _isLeadDayStarted = false;
+      _isLeadDayPaused = false;
+      _leadDayStartedAt = null;
+      _leadDayBreakStartedAt = null;
+      _leadDayElapsed = Duration.zero;
+      _leadDayBreakElapsed = Duration.zero;
+      _sessionCollectedContacts = 0;
+      _dashboardFuture = _fetchDashboardData();
     });
   }
 
@@ -945,43 +1902,28 @@ class _DashboardPageState extends State<DashboardPage> {
           final data =
               snapshot.data ??
               const _DashboardData(contacts: [], clients: [], leadSessions: []);
-          final today = DateTime.now();
           final scheduledMeetings =
               data.contacts.where((contact) {
-                return _isMeetingStatus(contact.status) &&
-                    contact.status != 'signed_contract';
-              }).toList()..sort((a, b) {
-                final aDate = a.contactDate ?? DateTime(9999);
-                final bDate = b.contactDate ?? DateTime(9999);
-                final dateCompare = aDate.compareTo(bDate);
-                if (dateCompare != 0) return dateCompare;
-                return a.contactTime.compareTo(b.contactTime);
-              });
-          final overdueMeetings = data.contacts.where((contact) {
-            if (contact.status != 'scheduled_meeting' ||
-                contact.contactDate == null) {
-              return false;
-            }
-            final contactDay = DateTime(
-              contact.contactDate!.year,
-              contact.contactDate!.month,
-              contact.contactDate!.day,
-            );
-            final todayOnly = DateTime(today.year, today.month, today.day);
-            return contactDay.isBefore(todayOnly);
-          }).toList();
+                return _isCurrentOrUpcomingMeeting(contact);
+              }).toList()..sort(
+                (a, b) =>
+                    _compareContactsByDateAndTime(a, b, newestFirst: false),
+              );
           final collectedContacts = data.contacts
               .where((contact) => !_isMeetingStatus(contact.status))
               .toList();
-
-          final visibleCollectedContacts = _areTomorrowMeetingsCollapsed
-              ? <Contact>[]
-              : collectedContacts;
+          final overdueMeetings = data.contacts.where((contact) {
+            return _isUnprocessedMeeting(contact);
+          }).toList();
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            _unprocessedMeetingsNotifier.value = overdueMeetings.length;
+          });
           final weeklyStats = _buildWeeklyDashboardStats(data);
 
           return RefreshIndicator(
-            onRefresh: () async => _reload(),
+            onRefresh: _reload,
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 96),
               children: [
                 ValueListenableBuilder<int>(
@@ -996,6 +1938,8 @@ class _DashboardPageState extends State<DashboardPage> {
                       currentMeetings: scheduledMeetings.length,
                       currentContacts: _sessionCollectedContacts,
                       onStart: _startLeadDay,
+                      onToggleBreak: _toggleLeadDayBreak,
+                      onFinish: _finishLeadDay,
                       onScheduleMeeting: () =>
                           _openLeadContactForm('scheduled_meeting'),
                       onAddLead: () => _openLeadContactForm('contact'),
@@ -1015,36 +1959,8 @@ class _DashboardPageState extends State<DashboardPage> {
                     contacts: scheduledMeetings,
                     leadingIcon: Icons.handshake_outlined,
                     onDelete: _deleteDashboardContact,
+                    onContactChanged: _updateDashboardContact,
                     onEditMeetingTime: _editDashboardMeetingTime,
-                  ),
-                ),
-                if (overdueMeetings.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _DashboardBodyPadding(
-                    child: _DashboardList(
-                      title: 'Zaległe / wymaga akcji',
-                      emptyText: 'Brak zaległych spotkań.',
-                      contacts: overdueMeetings,
-                      leadingIcon: Icons.priority_high_outlined,
-                      accentColor: appDanger,
-                      onDelete: _deleteDashboardContact,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 16),
-                _DashboardBodyPadding(
-                  child: _DashboardList(
-                    title: 'Zebrane kontakty',
-                    emptyText: 'Tutaj pojawią się zebrane leady',
-                    contacts: visibleCollectedContacts,
-                    leadingIcon: Icons.event_available_outlined,
-                    onDelete: _deleteDashboardContact,
-                    showExpandAction: true,
-                    isExpanded: !_areTomorrowMeetingsCollapsed,
-                    onToggleExpanded: () => setState(
-                      () => _areTomorrowMeetingsCollapsed =
-                          !_areTomorrowMeetingsCollapsed,
-                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -1055,6 +1971,17 @@ class _DashboardPageState extends State<DashboardPage> {
                     onToggleExpanded: () => setState(
                       () => _isWeeklyTileExpanded = !_isWeeklyTileExpanded,
                     ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _DashboardBodyPadding(
+                  child: _DashboardList(
+                    title: 'Kontakty',
+                    emptyText: 'Tutaj pojawią się zebrane leady.',
+                    contacts: collectedContacts,
+                    leadingIcon: Icons.groups_outlined,
+                    onDelete: _deleteDashboardContact,
+                    onContactChanged: _updateDashboardContact,
                   ),
                 ),
               ],
@@ -1190,6 +2117,8 @@ class _ActiveDashboardTile extends StatelessWidget {
     required this.currentMeetings,
     required this.currentContacts,
     required this.onStart,
+    required this.onToggleBreak,
+    required this.onFinish,
     required this.onScheduleMeeting,
     required this.onAddLead,
   });
@@ -1202,6 +2131,8 @@ class _ActiveDashboardTile extends StatelessWidget {
   final int currentMeetings;
   final int currentContacts;
   final VoidCallback onStart;
+  final VoidCallback onToggleBreak;
+  final VoidCallback onFinish;
   final VoidCallback onScheduleMeeting;
   final VoidCallback onAddLead;
 
@@ -1224,13 +2155,13 @@ class _ActiveDashboardTile extends StatelessWidget {
             child: Container(color: appWorkDark.withValues(alpha: 0.70)),
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 20),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 30),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     Expanded(
                       child: Column(
@@ -1272,7 +2203,7 @@ class _ActiveDashboardTile extends StatelessWidget {
                           const SizedBox(height: 8),
                           Text(
                             [
-                              'Obecny cel: $currentMeetings/$dailyGoal',
+                              'Umówione: $currentMeetings/$dailyGoal',
                               'Kontakty: $currentContacts',
                               _formatDuration(elapsed),
                             ].join(' | '),
@@ -1290,6 +2221,9 @@ class _ActiveDashboardTile extends StatelessWidget {
                     _LeadTimerControls(isStarted: isStarted, onStart: onStart),
                     if (isStarted)
                       _ActiveLeadButtons(
+                        isPaused: isPaused,
+                        onToggleBreak: onToggleBreak,
+                        onFinish: onFinish,
                         onScheduleMeeting: onScheduleMeeting,
                         onAddLead: onAddLead,
                       ),
@@ -1320,10 +2254,16 @@ class _DashboardBodyPadding extends StatelessWidget {
 
 class _ActiveLeadButtons extends StatelessWidget {
   const _ActiveLeadButtons({
+    required this.isPaused,
+    required this.onToggleBreak,
+    required this.onFinish,
     required this.onScheduleMeeting,
     required this.onAddLead,
   });
 
+  final bool isPaused;
+  final VoidCallback onToggleBreak;
+  final VoidCallback onFinish;
   final VoidCallback onScheduleMeeting;
   final VoidCallback onAddLead;
 
@@ -1343,6 +2283,20 @@ class _ActiveLeadButtons extends StatelessWidget {
           label: 'Dodaj kontakt',
           icon: Icons.person_add_alt_1_outlined,
           onPressed: onAddLead,
+        ),
+        const SizedBox(height: 6),
+        _ActiveLeadButton(
+          label: isPaused ? 'Wznów' : 'Przerwa',
+          icon: isPaused
+              ? Icons.play_arrow_rounded
+              : Icons.pause_circle_outline_rounded,
+          onPressed: onToggleBreak,
+        ),
+        const SizedBox(height: 6),
+        _ActiveLeadButton(
+          label: 'Koniec',
+          icon: Icons.stop_circle_outlined,
+          onPressed: onFinish,
         ),
       ],
     );
@@ -1689,13 +2643,10 @@ class _DashboardList extends StatelessWidget {
     required this.emptyText,
     required this.contacts,
     required this.onDelete,
+    this.onContactChanged,
     this.headerTrailing,
     this.onEditMeetingTime,
     this.leadingIcon,
-    this.accentColor = appBrand,
-    this.showExpandAction = false,
-    this.isExpanded = false,
-    this.onToggleExpanded,
   });
 
   final String title;
@@ -1703,18 +2654,13 @@ class _DashboardList extends StatelessWidget {
   final String emptyText;
   final List<Contact> contacts;
   final ValueChanged<Contact> onDelete;
+  final ValueChanged<Contact>? onContactChanged;
   final ValueChanged<Contact>? onEditMeetingTime;
   final IconData? leadingIcon;
-  final Color accentColor;
-  final bool showExpandAction;
-  final bool isExpanded;
-  final VoidCallback? onToggleExpanded;
 
   @override
   Widget build(BuildContext context) {
     final useSplitMeetingTiles = onEditMeetingTime != null;
-
-    if (showExpandAction && !isExpanded) return const SizedBox.shrink();
 
     if (useSplitMeetingTiles) {
       return Column(
@@ -1743,6 +2689,7 @@ class _DashboardList extends StatelessWidget {
               _RecentContactTile(
                 contact: contacts[index],
                 onDelete: () => onDelete(contacts[index]),
+                onContactChanged: onContactChanged,
                 onEditMeetingTime: useSplitMeetingTiles
                     ? () => onEditMeetingTime!(contacts[index])
                     : null,
@@ -1777,6 +2724,7 @@ class _DashboardList extends StatelessWidget {
               _RecentContactTile(
                 contact: contacts[index],
                 onDelete: () => onDelete(contacts[index]),
+                onContactChanged: onContactChanged,
               ),
             ],
         ],
@@ -1785,51 +2733,160 @@ class _DashboardList extends StatelessWidget {
   }
 }
 
-class _RecentContactTile extends StatelessWidget {
+class _RecentContactTile extends StatefulWidget {
   const _RecentContactTile({
     required this.contact,
     required this.onDelete,
+    this.onContactChanged,
     this.onEditMeetingTime,
   });
 
   final Contact contact;
   final VoidCallback onDelete;
+  final ValueChanged<Contact>? onContactChanged;
   final VoidCallback? onEditMeetingTime;
 
   @override
+  State<_RecentContactTile> createState() => _RecentContactTileState();
+}
+
+class _RecentContactTileState extends State<_RecentContactTile> {
+  bool _deleteActionOpen = false;
+  double _dragOffset = 0;
+  late Contact _displayContact;
+
+  static const double _actionsWidth = 86;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayContact = widget.contact;
+  }
+
+  @override
+  void didUpdateWidget(covariant _RecentContactTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.contact != widget.contact) {
+      _displayContact = widget.contact;
+    }
+  }
+
+  void _closeActions() {
+    setState(() {
+      _deleteActionOpen = false;
+      _dragOffset = 0;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final contact = _displayContact;
     final isMeeting = _isMeetingStatus(contact.status);
-    final useMeetingLayout = isMeeting && onEditMeetingTime != null;
+    final useMeetingLayout = isMeeting && widget.onEditMeetingTime != null;
     final trailingText = isMeeting
         ? (contact.contactTime.length >= 5
               ? contact.contactTime.substring(0, 5)
               : contact.contactTime)
         : _statusByValue(contact.status).label;
+    final tile = useMeetingLayout
+        ? _MeetingDashboardTileContent(
+            contact: contact,
+            timeText: trailingText,
+            onEditMeetingTime: widget.onEditMeetingTime,
+          )
+        : _ContactDashboardTileContent(
+            contact: contact,
+            trailingText: trailingText,
+          );
 
-    return Dismissible(
-      key: ValueKey('dashboard-contact-${contact.id}'),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          color: appDanger,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: const Icon(Icons.delete_outline, color: appSurface),
-      ),
-      onDismissed: (_) => onDelete(),
-      child: useMeetingLayout
-          ? _MeetingDashboardTileContent(
-              contact: contact,
-              timeText: trailingText,
-              onEditMeetingTime: onEditMeetingTime,
-            )
-          : _ContactDashboardTileContent(
-              contact: contact,
-              trailingText: trailingText,
+    return GestureDetector(
+      onHorizontalDragUpdate: (details) {
+        setState(() {
+          final nextOffset = _dragOffset + details.delta.dx;
+          _dragOffset = nextOffset.clamp(-_actionsWidth, 0);
+          _deleteActionOpen = _dragOffset < -36;
+        });
+      },
+      onHorizontalDragEnd: (details) {
+        final velocity = details.primaryVelocity ?? 0;
+        if (_dragOffset < -36 || velocity < -1100) {
+          setState(() {
+            _dragOffset = -_actionsWidth;
+            _deleteActionOpen = true;
+          });
+        } else {
+          _closeActions();
+        }
+      },
+      onHorizontalDragCancel: () {
+        setState(() {
+          _dragOffset = _deleteActionOpen ? -_actionsWidth : 0;
+        });
+      },
+      child: Stack(
+        children: [
+          Positioned.fill(
+            right: 0,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: _SwipeActionButton(
+                color: appDanger,
+                icon: Icons.delete_outline,
+                label: 'Usuń',
+                onPressed: () => _confirmDelete(context),
+              ),
             ),
+          ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            curve: Curves.easeOutCubic,
+            transform: Matrix4.translationValues(_dragOffset, 0, 0),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _deleteActionOpen
+                  ? _closeActions
+                  : () async {
+                      final updatedContact = await showContactDetailsSheet(
+                        context,
+                        contact,
+                      );
+                      if (updatedContact == null || !mounted) return;
+                      setState(() => _displayContact = updatedContact);
+                      widget.onContactChanged?.call(updatedContact);
+                    },
+              child: tile,
+            ),
+          ),
+        ],
+      ),
     );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        titlePadding: const EdgeInsets.fromLTRB(24, 18, 12, 8),
+        title: _DialogTitleWithClose(
+          title: 'Usunąć kontakt na stałe?',
+          onClose: () => Navigator.of(context).pop(false),
+        ),
+        content: const Text('Kontakt zostanie usunięty z aplikacji.'),
+        actions: [
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: appDanger),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Usuń'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      widget.onDelete();
+    } else if (mounted) {
+      _closeActions();
+    }
   }
 }
 
@@ -1854,81 +2911,77 @@ class _MeetingDashboardTileContent extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         side: const BorderSide(color: appBorderStrong),
       ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => showContactDetailsSheet(context, contact),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 10, // lewy i prawy
-            vertical: 8, // górny i dolny
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(8),
-                    onTap: onEditMeetingTime,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
-                        vertical: 4,
-                      ),
-                      child: Text(
-                        timeText,
-                        style: const TextStyle(
-                          color: appBrand,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w800,
-                        ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 10, // lewy i prawy
+          vertical: 8, // górny i dolny
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: onEditMeetingTime,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      timeText,
+                      style: const TextStyle(
+                        color: appBrand,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _DashboardContactTitle(
-                      contact: contact,
-                      titleFontSize: 15,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _DashboardContactTitle(
+                    contact: contact,
+                    titleFontSize: 15,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Nawiguj',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: contact.address.isEmpty
+                          ? null
+                          : () => _openMap(context, contact.address),
+                      icon: const Icon(Icons.home_outlined),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        tooltip: 'Nawiguj',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: contact.address.isEmpty
-                            ? null
-                            : () => _openMap(context, contact.address),
-                        icon: const Icon(Icons.home_outlined),
-                      ),
-                      IconButton(
-                        tooltip: 'Zadzwoń',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: contact.phone.isEmpty
-                            ? null
-                            : () => _callPhone(context, contact.phone),
-                        icon: const Icon(Icons.phone_outlined),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              if (note.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                const Divider(height: 1, thickness: 1, color: appBorder),
-                const SizedBox(height: 4),
-                Text(
-                  note,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: appTextSecondary, fontSize: 12),
+                    IconButton(
+                      tooltip: 'Zadzwoń',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: contact.phone.isEmpty
+                          ? null
+                          : () => _callPhone(context, contact.phone),
+                      icon: const Icon(Icons.phone_outlined),
+                    ),
+                  ],
                 ),
               ],
+            ),
+            if (note.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              const Divider(height: 1, thickness: 1, color: appBorder),
+              const SizedBox(height: 4),
+              Text(
+                note,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: appTextSecondary, fontSize: 12),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
@@ -1969,38 +3022,34 @@ class _ContactDashboardTileContent extends StatelessWidget {
     return Material(
       color: appSurfaceSoft,
       borderRadius: BorderRadius.circular(8),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: () => showContactDetailsSheet(context, contact),
-        child: Padding(
-          padding: const EdgeInsets.all(10),
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: appBrandSoft,
-                foregroundColor: appBrand,
-                child: Text(
-                  _initials(contact.contactName),
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(child: _DashboardContactText(contact: contact)),
-              const SizedBox(width: 8),
-              Text(
-                trailingText,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 18,
+              backgroundColor: appBrandSoft,
+              foregroundColor: appBrand,
+              child: Text(
+                _initials(contact.contactName),
                 style: const TextStyle(
-                  color: appBrand,
                   fontSize: 12,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(child: _DashboardContactText(contact: contact)),
+            const SizedBox(width: 8),
+            Text(
+              trailingText,
+              style: const TextStyle(
+                color: appBrand,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -2095,15 +3144,27 @@ class _ClientsPageState extends State<ClientsPage> {
     return clients;
   }
 
-  void _reload() {
-    setState(() => _clientsFuture = _fetchClients());
+  Future<void> _reload() async {
+    try {
+      final clients = await _fetchClients().timeout(_manualRefreshTimeout);
+      if (!mounted) return;
+      setState(() => _clientsFuture = Future.value(clients));
+    } catch (error) {
+      if (!mounted) return;
+      _ignoreManualRefreshError(error);
+    }
   }
 
   void _updateClientInList(Client updatedClient) {
-    final nextClients = [
-      for (final client in _clientsCache)
-        if (client.id == updatedClient.id) updatedClient else client,
-    ];
+    final hadClient = _clientsCache.any(
+      (client) => client.id == updatedClient.id,
+    );
+    final nextClients = hadClient
+        ? [
+            for (final client in _clientsCache)
+              if (client.id == updatedClient.id) updatedClient else client,
+          ]
+        : [..._clientsCache, updatedClient];
 
     setState(() {
       _clientsCache = nextClients;
@@ -2131,11 +3192,28 @@ class _ClientsPageState extends State<ClientsPage> {
 
           final clients = snapshot.data ?? [];
           if (clients.isEmpty) {
-            return const _EmptyState(
-              icon: Icons.precision_manufacturing_outlined,
-              text: 'Nie masz jeszcze realizacji.',
-              detail:
-                  'Przesuń kontakt w prawo, gdy umowa jest gotowa do realizacji.',
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                return RefreshIndicator(
+                  onRefresh: _reload,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    children: [
+                      SizedBox(
+                        height: constraints.maxHeight,
+                        child: const Center(
+                          child: _EmptyState(
+                            icon: Icons.precision_manufacturing_outlined,
+                            text: 'Nie masz jeszcze realizacji.',
+                            detail:
+                                'Przesuń kontakt w prawo, gdy umowa jest gotowa do realizacji.',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             );
           }
 
@@ -2145,8 +3223,9 @@ class _ClientsPageState extends State<ClientsPage> {
               .toList();
 
           return RefreshIndicator(
-            onRefresh: () async => _reload(),
+            onRefresh: _reload,
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 96),
               children: [
                 _RealizationQueueIntro(
@@ -2163,6 +3242,7 @@ class _ClientsPageState extends State<ClientsPage> {
                 else
                   for (var index = 0; index < activeClients.length; index++)
                     _ClientTile(
+                      key: ValueKey(activeClients[index].id),
                       client: activeClients[index],
                       onClientChanged: _updateClientInList,
                     ),
@@ -2256,9 +3336,16 @@ class _CompletedRealizationsShelf extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: appSurfaceSoft,
+        color: appTextPrimary,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: appBorder),
+        border: Border.all(color: appTextPrimary),
+        boxShadow: [
+          BoxShadow(
+            color: appTextPrimary.withValues(alpha: 0.16),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Row(
         children: [
@@ -2285,7 +3372,11 @@ class _CompletedRealizationsShelf extends StatelessWidget {
 }
 
 class _ClientTile extends StatefulWidget {
-  const _ClientTile({required this.client, required this.onClientChanged});
+  const _ClientTile({
+    super.key,
+    required this.client,
+    required this.onClientChanged,
+  });
 
   final Client client;
   final ValueChanged<Client> onClientChanged;
@@ -2295,9 +3386,25 @@ class _ClientTile extends StatefulWidget {
 }
 
 class _ClientTileState extends State<_ClientTile> {
+  late Client _displayClient;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayClient = widget.client;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ClientTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.client != widget.client) {
+      _displayClient = widget.client;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final client = widget.client;
+    final client = _displayClient;
     final statusStyle = _clientStatusStyle(client.status);
     final progress = _realizationProgress(client.status);
     final currentStage = _realizationStageNumber(client.status);
@@ -2323,6 +3430,7 @@ class _ClientTileState extends State<_ClientTile> {
           onTap: () async {
             final updatedClient = await showClientDetailsSheet(context, client);
             if (updatedClient != null) {
+              setState(() => _displayClient = updatedClient);
               widget.onClientChanged(updatedClient);
             }
           },
@@ -2758,7 +3866,7 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
 
     setState(() => _isSaving = true);
     try {
-      await _supabase
+      final updatedData = await _supabase
           .from('clients')
           .update({
             'client_name': _nameController.text.trim(),
@@ -2770,23 +3878,82 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
             'execution_method': _executionMethod,
             'status': _status,
           })
-          .eq('id', client.id);
+          .eq('id', client.id)
+          .select()
+          .single();
 
       if (!mounted) return;
-      final updatedClient = client.copyWith(
-        clientName: _nameController.text.trim(),
-        phone: _phoneController.text.trim(),
-        correspondenceAddress: _correspondenceAddressController.text.trim(),
-        installationAddress: _installationAddressController.text.trim(),
-        productName: _productController.text.trim(),
-        executionMethod: _executionMethod,
-        status: _status,
+      final updatedClient = Client.fromMap(
+        Map<String, dynamic>.from(updatedData),
       );
       setState(() {
         _currentClient = updatedClient;
+        _nameController.text = updatedClient.clientName;
+        _phoneController.text = updatedClient.phone;
+        _correspondenceAddressController.text =
+            updatedClient.correspondenceAddress;
+        _installationAddressController.text = updatedClient.installationAddress;
+        _productController.text = updatedClient.productName;
+        _status = updatedClient.status;
+        _executionMethod = normalizeExecutionMethod(
+          updatedClient.executionMethod,
+        );
         _isEditing = false;
       });
       Navigator.of(context).pop(updatedClient);
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  Future<void> _moveBackToMeeting() async {
+    if (_isSaving) return;
+
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    setState(() => _isSaving = true);
+    try {
+      final meetingPayload = {
+        'agent_id': user.id,
+        'contact_name': _nameController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'address': _installationAddressController.text.trim().isNotEmpty
+            ? _installationAddressController.text.trim()
+            : _correspondenceAddressController.text.trim(),
+        'status': 'scheduled_meeting',
+        'note': 'Powrót z realizacji do umówionych spotkań.',
+        'contact_date': _dateOnly(DateTime.now().add(const Duration(days: 1))),
+        'contact_time': '18:00:00',
+        'meeting_time': '18:00:00',
+        'moved_to_client_at': null,
+        'archived_at': null,
+      };
+
+      if (client.sourceContactId.isNotEmpty) {
+        await _supabase
+            .from('contacts')
+            .update(meetingPayload)
+            .eq('id', client.sourceContactId);
+      } else {
+        await _supabase.from('contacts').insert(meetingPayload);
+      }
+
+      await _supabase
+          .from('clients')
+          .update({'archived_at': DateTime.now().toIso8601String()})
+          .eq('id', client.id);
+
+      if (!mounted) return;
+      Navigator.of(context).pop(client.copyWith(status: 'lost'));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Realizacja wróciła do spotkań.')),
+      );
     } on PostgrestException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -2877,6 +4044,12 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
                     ),
                   ),
               ],
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: _isSaving ? null : _moveBackToMeeting,
+              icon: const Icon(Icons.event_available_outlined),
+              label: const Text('Wróć do spotkań'),
             ),
             const SizedBox(height: 18),
             AnimatedSwitcher(
@@ -3125,16 +4298,13 @@ class ContactsPage extends StatefulWidget {
 
 class _ContactsPageState extends State<ContactsPage> {
   late Future<List<Contact>> _contactsFuture;
+  List<Contact> _contactsCache = [];
   final Set<String> _selectedContactIds = {};
-  final Set<String> _hiddenStatuses = {};
-  final Map<String, List<String>> _contactOrderByStatus = {};
-  late List<String> _statusOrder;
   int _contactTilesResetSignal = 0;
 
   @override
   void initState() {
     super.initState();
-    _statusOrder = _contactStatuses.map((status) => status.value).toList();
     _contactsFuture = _fetchContacts();
   }
 
@@ -3147,34 +4317,36 @@ class _ContactsPageState extends State<ContactsPage> {
   }
 
   Future<List<Contact>> _fetchContacts() async {
-    final data = await _supabase
-        .from('contacts')
-        .select()
-        .isFilter('archived_at', null)
-        .isFilter('moved_to_client_at', null);
-
-    return (data as List)
-        .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
+    final contacts = await _fetchActiveContacts();
+    final visibleContacts = contacts
         .where((contact) => !_isMeetingStatus(contact.status))
         .toList();
+    _contactsCache = visibleContacts;
+    return visibleContacts;
   }
 
-  void _reload() {
-    setState(() {
-      _contactsFuture = _fetchContacts();
-    });
+  Future<void> _reload() async {
+    if (!mounted) return;
+    try {
+      final contacts = await _fetchContacts().timeout(_manualRefreshTimeout);
+      if (!mounted) return;
+      setState(() => _contactsFuture = Future.value(contacts));
+    } catch (error) {
+      if (!mounted) return;
+      _ignoreManualRefreshError(error);
+    }
+  }
+
+  Future<void> _addContact() async {
+    final saved = await showAddContactSheet(context, initialStatus: 'contact');
+    if (saved == true) {
+      _reload();
+    }
   }
 
   void _resetOpenContactTiles() {
+    if (!mounted) return;
     setState(() => _contactTilesResetSignal++);
-  }
-
-  Future<void> _archiveContact(Contact contact) async {
-    await _supabase
-        .from('contacts')
-        .update({'archived_at': DateTime.now().toIso8601String()})
-        .eq('id', contact.id);
-    _reload();
   }
 
   Future<void> _deleteContact(Contact contact) async {
@@ -3182,65 +4354,23 @@ class _ContactsPageState extends State<ContactsPage> {
     _reload();
   }
 
-  Future<void> _addContactToClients(Contact contact) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return;
-
-    await _supabase.from('clients').insert({
-      'agent_id': user.id,
-      'source_contact_id': contact.id,
-      'client_name': contact.contactName,
-      'phone': contact.phone,
-      'correspondence_address': contact.address,
-      'installation_address': contact.address,
-      'product_name': '',
-      'contract_signed_at': _dateOnly(DateTime.now()),
-      'execution_method': 'finansowanie',
-      'status': 'signed_contract',
-    });
-
+  Future<void> _moveContactToMeeting(Contact contact) async {
     await _supabase
         .from('contacts')
-        .update({'moved_to_client_at': DateTime.now().toIso8601String()})
+        .update({
+          'status': 'scheduled_meeting',
+          'contact_date': _dateOnly(
+            DateTime.now().add(const Duration(days: 1)),
+          ),
+          'contact_time': '18:00:00',
+          'meeting_time': '18:00:00',
+        })
         .eq('id', contact.id);
-
-    _reload();
-  }
-
-  Future<void> _archiveSelected() async {
-    final count = _selectedContactIds.length;
-    if (count == 0) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Przenieść do archiwum?'),
-        content: Text('Zaznaczone kontakty: $count.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Przenieś'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    await _supabase
-        .from('contacts')
-        .update({'archived_at': DateTime.now().toIso8601String()})
-        .inFilter('id', _selectedContactIds.toList());
-
-    setState(_selectedContactIds.clear);
     _reload();
   }
 
   void _toggleContactSelection(Contact contact) {
+    if (!mounted) return;
     setState(() {
       if (_selectedContactIds.contains(contact.id)) {
         _selectedContactIds.remove(contact.id);
@@ -3250,59 +4380,26 @@ class _ContactsPageState extends State<ContactsPage> {
     });
   }
 
-  void _toggleStatusVisibility(String status) {
-    setState(() {
-      if (_hiddenStatuses.contains(status)) {
-        _hiddenStatuses.remove(status);
-      } else {
-        _hiddenStatuses.add(status);
-      }
-    });
-  }
-
-  void _moveStatusBefore(String draggedStatus, String targetStatus) {
-    if (draggedStatus == targetStatus) return;
-
-    setState(() {
-      final oldIndex = _statusOrder.indexOf(draggedStatus);
-      final newIndex = _statusOrder.indexOf(targetStatus);
-      if (oldIndex == -1 || newIndex == -1) return;
-
-      final status = _statusOrder.removeAt(oldIndex);
-      _statusOrder.insert(newIndex, status);
-    });
-  }
-
-  void _reorderContactInStatus(String status, int oldIndex, int newIndex) {
-    setState(() {
-      final order = _contactOrderByStatus.putIfAbsent(status, () => []);
-      final contactId = order.removeAt(oldIndex);
-      order.insert(newIndex, contactId);
-    });
-  }
-
-  List<Contact> _orderedContactsForStatus(
-    List<Contact> contacts,
-    String status,
-  ) {
-    final statusContacts = contacts
-        .where((contact) => contact.status == status)
-        .toList();
-    final knownIds = statusContacts.map((contact) => contact.id).toSet();
-    final savedOrder = _contactOrderByStatus.putIfAbsent(status, () => []);
-    savedOrder.removeWhere((id) => !knownIds.contains(id));
-
-    for (final contact in statusContacts) {
-      if (!savedOrder.contains(contact.id)) {
-        savedOrder.add(contact.id);
-      }
+  void _updateContactInList(Contact updatedContact) {
+    if (_isMeetingStatus(updatedContact.status)) {
+      _reload();
+      return;
     }
 
-    final byId = {for (final contact in statusContacts) contact.id: contact};
-    return [
-      for (final id in savedOrder)
-        if (byId[id] != null) byId[id]!,
-    ];
+    final hadContact = _contactsCache.any(
+      (contact) => contact.id == updatedContact.id,
+    );
+    final nextContacts = hadContact
+        ? [
+            for (final contact in _contactsCache)
+              if (contact.id == updatedContact.id) updatedContact else contact,
+          ]
+        : [..._contactsCache, updatedContact];
+
+    setState(() {
+      _contactsCache = nextContacts;
+      _contactsFuture = Future.value(nextContacts);
+    });
   }
 
   @override
@@ -3324,88 +4421,88 @@ class _ContactsPageState extends State<ContactsPage> {
           }
 
           final contacts = snapshot.data ?? [];
-          final statusesWithContacts = contacts
-              .map((contact) => contact.status)
-              .toSet();
-          final visibleStatusOrder = _statusOrder
-              .where(statusesWithContacts.contains)
-              .toList();
-          final orderedStatuses = visibleStatusOrder
-              .map(_statusByValue)
-              .toList();
 
           if (contacts.isEmpty) {
-            return const _EmptyState(
-              icon: Icons.contacts_outlined,
-              text: 'Nie masz jeszcze kontaktów.',
-              detail: 'Kliknij plus i dodaj pierwszy kontakt.',
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return RefreshIndicator(
+                        onRefresh: _reload,
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            SizedBox(
+                              height: constraints.maxHeight,
+                              child: const Center(
+                                child: _EmptyState(
+                                  icon: Icons.contacts_outlined,
+                                  text: 'Nie masz jeszcze kontaktów.',
+                                  detail: 'Dodaj pierwszy kontakt.',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 15),
+                    child: _AddContactHorizontalButton(onPressed: _addContact),
+                  ),
+                ),
+              ],
             );
           }
 
-          return RefreshIndicator(
-            onRefresh: () async => _reload(),
-            child: GestureDetector(
-              behavior: HitTestBehavior.translucent,
-              onTap: _resetOpenContactTiles,
-              child: ListView(
-                padding: const EdgeInsets.only(bottom: 96),
-                children: [
-                  if (_selectedContactIds.isNotEmpty) ...[
-                    _SelectedContactsBar(
-                      count: _selectedContactIds.length,
-                      onArchive: _archiveSelected,
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  _StatusVisibilityBar(
-                    statusOrder: visibleStatusOrder,
-                    hiddenStatuses: _hiddenStatuses,
-                    onToggle: _toggleStatusVisibility,
-                    onMoveBefore: _moveStatusBefore,
-                  ),
-                  const SizedBox(height: 18),
-                  for (final status in orderedStatuses)
-                    AnimatedSwitcher(
-                      key: ValueKey('switch-${status.value}'),
-                      duration: const Duration(milliseconds: 260),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeInCubic,
-                      transitionBuilder: (child, animation) {
-                        return SizeTransition(
-                          sizeFactor: animation,
-                          alignment: AlignmentDirectional.topStart,
-                          child: FadeTransition(
-                            opacity: animation,
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: _hiddenStatuses.contains(status.value)
-                          ? const SizedBox.shrink()
-                          : _ContactStatusSection(
-                              key: ValueKey('section-${status.value}'),
-                              status: status,
-                              contacts: _orderedContactsForStatus(
-                                contacts,
-                                status.value,
-                              ),
-                              selectedContactIds: _selectedContactIds,
-                              onArchive: _archiveContact,
-                              onAddToClients: _addContactToClients,
-                              onDelete: _deleteContact,
-                              onToggleSelection: _toggleContactSelection,
-                              resetSignal: _contactTilesResetSignal,
-                              onReorder: (oldIndex, newIndex) =>
-                                  _reorderContactInStatus(
-                                    status.value,
-                                    oldIndex,
-                                    newIndex,
-                                  ),
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: RefreshIndicator(
+                  onRefresh: _reload,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _resetOpenContactTiles,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 96),
+                      children: [
+                        for (final contact in contacts)
+                          _ContactTile(
+                            key: ValueKey(contact.id),
+                            contact: contact,
+                            isSelected: _selectedContactIds.contains(
+                              contact.id,
                             ),
+                            isSelectionMode: _selectedContactIds.isNotEmpty,
+                            primaryActionIcon: Icons.event_available_outlined,
+                            primaryActionLabel: 'Umów',
+                            onPrimaryAction: () =>
+                                _moveContactToMeeting(contact),
+                            onDelete: () => _deleteContact(contact),
+                            onContactChanged: _updateContactInList,
+                            onToggleSelection: () =>
+                                _toggleContactSelection(contact),
+                            resetSignal: _contactTilesResetSignal,
+                          ),
+                      ],
                     ),
-                ],
+                  ),
+                ),
               ),
-            ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 15),
+                  child: _AddContactHorizontalButton(onPressed: _addContact),
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -3413,299 +4510,265 @@ class _ContactsPageState extends State<ContactsPage> {
   }
 }
 
-class _StatusVisibilityBar extends StatelessWidget {
-  const _StatusVisibilityBar({
-    required this.statusOrder,
-    required this.hiddenStatuses,
-    required this.onToggle,
-    required this.onMoveBefore,
+class MeetingsPage extends StatefulWidget {
+  const MeetingsPage({super.key});
+
+  @override
+  State<MeetingsPage> createState() => _MeetingsPageState();
+}
+
+class _MeetingsPageState extends State<MeetingsPage> {
+  late Future<List<Contact>> _meetingsFuture;
+  List<Contact> _meetingsCache = [];
+  int _meetingTilesResetSignal = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _meetingsFuture = _fetchMeetings();
+  }
+
+  Future<List<Contact>> _fetchMeetings() async {
+    final contacts = await _fetchActiveContacts();
+    final meetings = contacts.where(_isCurrentOrUpcomingMeeting).toList();
+    _meetingsCache = meetings;
+    return meetings;
+  }
+
+  Future<void> _reload() async {
+    if (!mounted) return;
+    try {
+      final meetings = await _fetchMeetings().timeout(_manualRefreshTimeout);
+      if (!mounted) return;
+      setState(() => _meetingsFuture = Future.value(meetings));
+    } catch (error) {
+      if (!mounted) return;
+      _ignoreManualRefreshError(error);
+    }
+  }
+
+  Future<void> _addMeeting() async {
+    final saved = await showAddContactSheet(
+      context,
+      initialStatus: 'scheduled_meeting',
+    );
+    if (saved == true) _reload();
+  }
+
+  void _resetOpenMeetingTiles() {
+    if (!mounted) return;
+    setState(() => _meetingTilesResetSignal++);
+  }
+
+  void _updateMeetingInList(Contact updatedContact) {
+    if (updatedContact.status == 'signed_contract') {
+      final nextMeetings = _meetingsCache
+          .where((contact) => contact.id != updatedContact.id)
+          .toList();
+      setState(() {
+        _meetingsCache = nextMeetings;
+        _meetingsFuture = Future.value(nextMeetings);
+      });
+      return;
+    }
+
+    if (!_isMeetingStatus(updatedContact.status)) {
+      _reload();
+      return;
+    }
+
+    final hadMeeting = _meetingsCache.any(
+      (contact) => contact.id == updatedContact.id,
+    );
+    final nextMeetings = hadMeeting
+        ? [
+            for (final contact in _meetingsCache)
+              if (contact.id == updatedContact.id) updatedContact else contact,
+          ]
+        : [..._meetingsCache, updatedContact];
+
+    setState(() {
+      _meetingsCache = nextMeetings;
+      _meetingsFuture = Future.value(nextMeetings);
+    });
+  }
+
+  Future<void> _moveMeetingToClients(Contact contact) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return;
+
+    await _supabase.from('clients').insert({
+      'agent_id': user.id,
+      'source_contact_id': contact.id,
+      'client_name': contact.contactName,
+      'phone': contact.phone,
+      'correspondence_address': contact.address,
+      'installation_address': contact.address,
+      'product_name': '',
+      'contract_signed_at': _dateOnly(DateTime.now()),
+      'execution_method': 'finansowanie',
+      'status': 'signed_contract',
+    });
+
+    await _supabase
+        .from('contacts')
+        .update({
+          'status': 'signed_contract',
+          'moved_to_client_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', contact.id);
+
+    _updateMeetingInList(contact.copyWith(status: 'signed_contract'));
+  }
+
+  Future<void> _deleteMeeting(Contact contact) async {
+    await _supabase.from('contacts').delete().eq('id', contact.id);
+    _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PageShell(
+      child: FutureBuilder<List<Contact>>(
+        future: _meetingsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (snapshot.hasError) {
+            return _EmptyState(
+              icon: Icons.error_outline,
+              text: 'Nie udało się pobrać spotkań.',
+              detail: snapshot.error.toString(),
+            );
+          }
+
+          final meetings = snapshot.data ?? [];
+
+          if (meetings.isEmpty) {
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      return RefreshIndicator(
+                        onRefresh: _reload,
+                        child: ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          children: [
+                            SizedBox(
+                              height: constraints.maxHeight,
+                              child: const Center(
+                                child: _EmptyState(
+                                  icon: Icons.event_available_outlined,
+                                  text: 'Nie masz umówionych spotkań.',
+                                  detail:
+                                      'Dodaj spotkanie albo przenieś kontakt dalej.',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 15),
+                    child: _AddContactHorizontalButton(
+                      onPressed: _addMeeting,
+                      label: 'Dodaj spotkanie',
+                      icon: Icons.event_available_outlined,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: RefreshIndicator(
+                  onRefresh: _reload,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _resetOpenMeetingTiles,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 96),
+                      children: [
+                        for (final meeting in meetings)
+                          _ContactTile(
+                            key: ValueKey(meeting.id),
+                            contact: meeting,
+                            isSelected: false,
+                            isSelectionMode: false,
+                            showContactTypePill: false,
+                            showMeetingHeader: true,
+                            primaryActionIcon:
+                                Icons.precision_manufacturing_outlined,
+                            primaryActionLabel: 'Realizacja',
+                            onPrimaryAction: () =>
+                                _moveMeetingToClients(meeting),
+                            onDelete: () => _deleteMeeting(meeting),
+                            onContactChanged: _updateMeetingInList,
+                            onToggleSelection: () {},
+                            resetSignal: _meetingTilesResetSignal,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 15),
+                  child: _AddContactHorizontalButton(
+                    onPressed: _addMeeting,
+                    label: 'Umów spotkanie',
+                    icon: Icons.event_available_outlined,
+                  ),
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _AddContactHorizontalButton extends StatelessWidget {
+  const _AddContactHorizontalButton({
+    required this.onPressed,
+    this.label = 'Dodaj kontakt',
+    this.icon = Icons.person_add_alt_1_rounded,
   });
 
-  final List<String> statusOrder;
-  final Set<String> hiddenStatuses;
-  final ValueChanged<String> onToggle;
-  final void Function(String draggedStatus, String targetStatus) onMoveBefore;
-
-  static const double _circleSize = 42;
-  static const double _gap = 8;
-  static const double _slotWidth = _circleSize + _gap;
+  final VoidCallback onPressed;
+  final String label;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      height: 48,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SizedBox(
-          width: statusOrder.length * _slotWidth,
-          height: 48,
-          child: Stack(
-            children: [
-              for (var index = 0; index < statusOrder.length; index++)
-                _AnimatedStatusSlot(
-                  key: ValueKey(statusOrder[index]),
-                  left: index * _slotWidth,
-                  status: _statusByValue(statusOrder[index]),
-                  isHidden: hiddenStatuses.contains(statusOrder[index]),
-                  onToggle: onToggle,
-                  onMoveBefore: onMoveBefore,
-                ),
-            ],
-          ),
+      width: double.infinity,
+      child: FilledButton.icon(
+        style: FilledButton.styleFrom(
+          backgroundColor: appBrand,
+          foregroundColor: appSurface,
+          minimumSize: const Size.fromHeight(48),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-      ),
-    );
-  }
-}
-
-class _SelectedContactsBar extends StatelessWidget {
-  const _SelectedContactsBar({required this.count, required this.onArchive});
-
-  final int count;
-  final VoidCallback onArchive;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: appSurfaceSoft,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: appBorder),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              'Zaznaczone kontakty: $count',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-          OutlinedButton.icon(
-            onPressed: onArchive,
-            icon: const Icon(Icons.archive_outlined, size: 18),
-            label: const Text('Archiwum'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AnimatedStatusSlot extends StatelessWidget {
-  const _AnimatedStatusSlot({
-    super.key,
-    required this.left,
-    required this.status,
-    required this.isHidden,
-    required this.onToggle,
-    required this.onMoveBefore,
-  });
-
-  final double left;
-  final ContactStatus status;
-  final bool isHidden;
-  final ValueChanged<String> onToggle;
-  final void Function(String draggedStatus, String targetStatus) onMoveBefore;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 210),
-      curve: Curves.easeOutCubic,
-      left: left,
-      top: 3,
-      width: 42,
-      height: 42,
-      child: DragTarget<String>(
-        onWillAcceptWithDetails: (details) {
-          if (details.data != status.value) {
-            onMoveBefore(details.data, status.value);
-          }
-          return true;
-        },
-        builder: (context, candidateData, rejectedData) {
-          return Draggable<String>(
-            data: status.value,
-            feedback: Material(
-              color: Colors.transparent,
-              shape: const CircleBorder(),
-              child: _StatusCircle(
-                status: status,
-                isHidden: isHidden,
-                scale: 1.08,
-              ),
-            ),
-            childWhenDragging: _StatusCirclePlaceholder(
-              color: status.color,
-              isHidden: isHidden,
-            ),
-            child: Tooltip(
-              message: status.label,
-              child: InkWell(
-                customBorder: const CircleBorder(),
-                onTap: () => onToggle(status.value),
-                child: _StatusCircle(status: status, isHidden: isHidden),
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _StatusCirclePlaceholder extends StatelessWidget {
-  const _StatusCirclePlaceholder({required this.color, required this.isHidden});
-
-  final Color color;
-  final bool isHidden;
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 160),
-      curve: Curves.easeOutCubic,
-      width: 42,
-      height: 42,
-      decoration: BoxDecoration(
-        color: (isHidden ? appBorderStrong : color).withValues(alpha: 0.16),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: (isHidden ? appBorderStrong : color).withValues(alpha: 0.26),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusCircle extends StatelessWidget {
-  const _StatusCircle({
-    required this.status,
-    required this.isHidden,
-    this.scale = 1,
-  });
-
-  final ContactStatus status;
-  final bool isHidden;
-  final double scale;
-
-  @override
-  Widget build(BuildContext context) {
-    return Transform.scale(
-      scale: scale,
-      child: Material(
-        color: Colors.transparent,
-        shape: const CircleBorder(),
-        child: Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: isHidden ? appBorderStrong : status.color,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            isHidden ? Icons.visibility_off : Icons.visibility,
-            color: appSurface.withValues(alpha: isHidden ? 0.34 : 0.24),
-            size: 20,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ContactStatusSection extends StatelessWidget {
-  const _ContactStatusSection({
-    super.key,
-    required this.status,
-    required this.contacts,
-    required this.selectedContactIds,
-    required this.onArchive,
-    required this.onAddToClients,
-    required this.onDelete,
-    required this.onToggleSelection,
-    required this.resetSignal,
-    required this.onReorder,
-  });
-
-  final ContactStatus status;
-  final List<Contact> contacts;
-  final Set<String> selectedContactIds;
-  final Future<void> Function(Contact contact) onArchive;
-  final Future<void> Function(Contact contact) onAddToClients;
-  final Future<void> Function(Contact contact) onDelete;
-  final ValueChanged<Contact> onToggleSelection;
-  final int resetSignal;
-  final void Function(int oldIndex, int newIndex) onReorder;
-
-  @override
-  Widget build(BuildContext context) {
-    if (contacts.isEmpty) return const SizedBox.shrink();
-
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 10,
-                height: 10,
-                decoration: BoxDecoration(
-                  color: status.color,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                status.label,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                '${contacts.length}',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: appTextSecondary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ReorderableListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            buildDefaultDragHandles: false,
-            itemCount: contacts.length,
-            onReorderItem: onReorder,
-            proxyDecorator: (child, index, animation) {
-              return ScaleTransition(
-                scale: Tween<double>(begin: 1, end: 1.02).animate(animation),
-                child: child,
-              );
-            },
-            itemBuilder: (context, index) {
-              final contact = contacts[index];
-              return ReorderableDragStartListener(
-                key: ValueKey('tile-${contact.id}'),
-                index: index,
-                child: _ContactTile(
-                  contact: contact,
-                  isSelected: selectedContactIds.contains(contact.id),
-                  isSelectionMode: selectedContactIds.isNotEmpty,
-                  onArchive: () => onArchive(contact),
-                  onAddToClients: () => onAddToClients(contact),
-                  onDelete: () => onDelete(contact),
-                  onToggleSelection: () => onToggleSelection(contact),
-                  resetSignal: resetSignal,
-                ),
-              );
-            },
-          ),
-        ],
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+        label: Text(label, style: const TextStyle(fontWeight: FontWeight.w800)),
       ),
     );
   }
@@ -3713,40 +4776,59 @@ class _ContactStatusSection extends StatelessWidget {
 
 class _ContactTile extends StatefulWidget {
   const _ContactTile({
+    super.key,
     required this.contact,
     required this.isSelected,
     required this.isSelectionMode,
-    required this.onArchive,
-    required this.onAddToClients,
+    required this.primaryActionIcon,
+    required this.primaryActionLabel,
+    required this.onPrimaryAction,
     required this.onDelete,
+    required this.onContactChanged,
     required this.onToggleSelection,
     required this.resetSignal,
+    this.showContactTypePill = true,
+    this.showMeetingHeader = false,
   });
 
   final Contact contact;
   final bool isSelected;
   final bool isSelectionMode;
-  final Future<void> Function() onArchive;
-  final Future<void> Function() onAddToClients;
+  final IconData primaryActionIcon;
+  final String primaryActionLabel;
+  final Future<void> Function() onPrimaryAction;
   final Future<void> Function() onDelete;
+  final ValueChanged<Contact> onContactChanged;
   final VoidCallback onToggleSelection;
   final int resetSignal;
+  final bool showContactTypePill;
+  final bool showMeetingHeader;
 
   @override
   State<_ContactTile> createState() => _ContactTileState();
 }
 
 class _ContactTileState extends State<_ContactTile> {
+  late Contact _displayContact;
   bool _leftActionsOpen = false;
   bool _rightActionsOpen = false;
   double _dragOffset = 0;
 
-  static const double _actionsWidth = 154;
+  static const double _actionsWidth = 86;
   static const double _clientActionWidth = 86;
+
+  @override
+  void initState() {
+    super.initState();
+    _displayContact = widget.contact;
+  }
 
   @override
   void didUpdateWidget(covariant _ContactTile oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.contact != widget.contact) {
+      _displayContact = widget.contact;
+    }
     if (oldWidget.resetSignal != widget.resetSignal) {
       setState(() {
         _leftActionsOpen = false;
@@ -3756,11 +4838,87 @@ class _ContactTileState extends State<_ContactTile> {
     }
   }
 
+  Future<void> _pickAndSaveContactStatus(
+    BuildContext context,
+    Contact contact,
+  ) async {
+    final selected = await _showContactWorkStatusPicker(
+      context,
+      value: contact.contactStatus,
+    );
+    if (!mounted || selected == contact.contactStatus) return;
+
+    try {
+      final updatedData = await _supabase
+          .from('contacts')
+          .update({'contact_status': selected})
+          .eq('id', contact.id)
+          .select()
+          .single();
+      if (!mounted) return;
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      setState(() => _displayContact = updatedContact);
+      widget.onContactChanged(updatedContact);
+    } on PostgrestException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  Future<void> _pickAndSaveContactTypes(
+    BuildContext context,
+    Contact contact,
+  ) async {
+    final selected = await _showContactTypesPicker(
+      context,
+      selectedValues: _contactTypeValuesFromRaw(contact.contactType),
+    );
+    if (!mounted || selected == null) return;
+    final nextRaw = _contactTypeValuesToRaw(selected);
+    if (nextRaw == contact.contactType) return;
+
+    try {
+      final updatedData = await _supabase
+          .from('contacts')
+          .update({'contact_type': selected.isEmpty ? null : nextRaw})
+          .eq('id', contact.id)
+          .select()
+          .single();
+      if (!mounted) return;
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      setState(() => _displayContact = updatedContact);
+      widget.onContactChanged(updatedContact);
+    } on PostgrestException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final contact = widget.contact;
+    final contact = _displayContact;
     final status = _statusByValue(contact.status);
+    final contactTypeStatuses = _contactTypeStatusesFor(contact);
+    final contactWorkStatus =
+        contact.contactStatus == null || contact.contactStatus!.isEmpty
+        ? null
+        : _statusByValue(contact.contactStatus!);
     final subtitle = _contactSubtitle(contact);
+    final isMeetingTile =
+        widget.showMeetingHeader &&
+        _stageForContactStatus(contact.status) == 'meeting';
+    final showContactHeader =
+        !isMeetingTile &&
+        widget.showContactTypePill &&
+        (contactTypeStatuses.isNotEmpty || contactWorkStatus != null);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -3770,7 +4928,7 @@ class _ContactTileState extends State<_ContactTile> {
             final nextOffset = _dragOffset + details.delta.dx;
             _dragOffset = nextOffset.clamp(-_actionsWidth, _clientActionWidth);
             _leftActionsOpen = _dragOffset > 42;
-            _rightActionsOpen = _dragOffset < -72;
+            _rightActionsOpen = _dragOffset < -36;
           });
         },
         onHorizontalDragEnd: (details) {
@@ -3781,7 +4939,7 @@ class _ContactTileState extends State<_ContactTile> {
               _leftActionsOpen = true;
               _rightActionsOpen = false;
             });
-          } else if (_dragOffset < -118 || velocity < -1100) {
+          } else if (_dragOffset < -36 || velocity < -1100) {
             setState(() {
               _dragOffset = -_actionsWidth;
               _leftActionsOpen = false;
@@ -3812,9 +4970,9 @@ class _ContactTileState extends State<_ContactTile> {
                 alignment: Alignment.centerLeft,
                 child: _SwipeActionButton(
                   color: appBrand,
-                  icon: Icons.add,
-                  label: 'Klient',
-                  onPressed: () => _confirmAddToClients(context),
+                  icon: widget.primaryActionIcon,
+                  label: widget.primaryActionLabel,
+                  onPressed: () => _confirmPrimaryAction(context),
                 ),
               ),
             ),
@@ -3822,23 +4980,11 @@ class _ContactTileState extends State<_ContactTile> {
               right: 0,
               child: Align(
                 alignment: Alignment.centerRight,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _SwipeActionButton(
-                      color: appWarning,
-                      icon: Icons.archive_outlined,
-                      label: 'Archiwum',
-                      onPressed: () => _confirmArchive(context),
-                    ),
-                    const SizedBox(width: 6),
-                    _SwipeActionButton(
-                      color: appDanger,
-                      icon: Icons.close,
-                      label: 'Usuń',
-                      onPressed: () => _confirmDelete(context),
-                    ),
-                  ],
+                child: _SwipeActionButton(
+                  color: appDanger,
+                  icon: Icons.delete_outline,
+                  label: 'Usuń',
+                  onPressed: () => _confirmDelete(context),
                 ),
               ),
             ),
@@ -3847,7 +4993,7 @@ class _ContactTileState extends State<_ContactTile> {
               curve: Curves.easeOutCubic,
               transform: Matrix4.translationValues(_dragOffset, 0, 0),
               child: Material(
-                color: widget.isSelected ? appBrandSoft : appSurface,
+                color: widget.isSelected ? appBrandSoft : appSurfaceSoft,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
                   side: BorderSide(
@@ -3865,73 +5011,182 @@ class _ContactTileState extends State<_ContactTile> {
                           _rightActionsOpen = false;
                           _dragOffset = 0;
                         })
-                      : () => showContactDetailsSheet(context, contact),
+                      : () async {
+                          final updatedContact = await showContactDetailsSheet(
+                            context,
+                            contact,
+                          );
+                          if (updatedContact == null) return;
+                          setState(() => _displayContact = updatedContact);
+                          widget.onContactChanged(updatedContact);
+                        },
                   onLongPress: widget.onToggleSelection,
                   child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Row(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 8,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        if (widget.isSelectionMode) ...[
-                          Icon(
-                            widget.isSelected
-                                ? Icons.check_circle
-                                : Icons.radio_button_unchecked,
-                            color: appBrand,
-                          ),
-                          const SizedBox(width: 10),
-                        ],
-                        CircleAvatar(
-                          backgroundColor: status.color.withValues(alpha: 0.14),
-                          foregroundColor: status.color,
-                          child: Text(_initials(contact.contactName)),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                        if (isMeetingTile || showContactHeader) ...[
+                          Row(
                             children: [
-                              Text(
+                              Expanded(
+                                child: isMeetingTile
+                                    ? Text(
+                                        _meetingDateTimeText(contact),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: appTextPrimary,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      )
+                                    : InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () => _pickAndSaveContactTypes(
+                                          context,
+                                          contact,
+                                        ),
+                                        child: _ContactTypeDots(
+                                          statuses: contactTypeStatuses,
+                                        ),
+                                      ),
+                              ),
+                              if (isMeetingTile) ...[
+                                const SizedBox(width: 10),
+                                Text(
+                                  _meetingCity(contact.address),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: appTextSecondary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ],
+                              if (!isMeetingTile &&
+                                  contactWorkStatus != null) ...[
+                                const SizedBox(width: 10),
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(999),
+                                  onTap: () => _pickAndSaveContactStatus(
+                                    context,
+                                    contact,
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(2),
+                                    child: Icon(
+                                      contactWorkStatus.icon ??
+                                          Icons.label_outline_rounded,
+                                      color: contactWorkStatus.color,
+                                      size: 21,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          const Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: appBorder,
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                        Row(
+                          children: [
+                            if (widget.isSelectionMode) ...[
+                              Icon(
+                                widget.isSelected
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                color: appBrand,
+                              ),
+                              const SizedBox(width: 10),
+                            ],
+                            if (!isMeetingTile) ...[
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 4,
+                                ),
+                                child: CircleAvatar(
+                                  backgroundColor: status.color.withValues(
+                                    alpha: 0.14,
+                                  ),
+                                  foregroundColor: status.color,
+                                  child: Text(_initials(contact.contactName)),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
+                            Expanded(
+                              child: Text(
                                 contact.contactName.isEmpty
                                     ? 'Bez nazwy'
                                     : contact.contactName,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                              const SizedBox(height: 4),
-                              if (subtitle.isNotEmpty)
-                                Text(
-                                  subtitle,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: appTextSecondary,
-                                  ),
+                                style: const TextStyle(
+                                  color: appTextPrimary,
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w900,
                                 ),
+                              ),
+                            ),
+                            if (!widget.isSelectionMode) ...[
+                              const SizedBox(width: 10),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Nawiguj',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: contact.address.isEmpty
+                                        ? null
+                                        : () => _openMap(
+                                            context,
+                                            contact.address,
+                                          ),
+                                    icon: const Icon(Icons.home_outlined),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Zadzwoń',
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: contact.phone.isEmpty
+                                        ? null
+                                        : () => _callPhone(
+                                            context,
+                                            contact.phone,
+                                          ),
+                                    icon: const Icon(Icons.phone_outlined),
+                                  ),
+                                ],
+                              ),
                             ],
-                          ),
+                          ],
                         ),
-                        if (contact.address.isNotEmpty &&
-                            !widget.isSelectionMode) ...[
-                          const SizedBox(width: 10),
-                          IconButton(
-                            tooltip: 'Nawiguj',
-                            color: appBrand,
-                            onPressed: () => _openMap(context, contact.address),
-                            iconSize: 25,
-                            icon: const Icon(Icons.home),
+                        if (subtitle.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          const Divider(
+                            height: 1,
+                            thickness: 1,
+                            color: appBorder,
                           ),
-                        ],
-                        if (contact.phone.isNotEmpty &&
-                            !widget.isSelectionMode) ...[
-                          const SizedBox(width: 8),
-                          IconButton(
-                            tooltip: 'Zadzwoń',
-                            color: appBrand,
-                            onPressed: () => _callPhone(context, contact.phone),
-                            iconSize: 25,
-                            icon: const Icon(Icons.phone),
+                          const SizedBox(height: 4),
+                          Text(
+                            subtitle,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: appTextSecondary,
+                              fontSize: 12,
+                            ),
                           ),
                         ],
                       ],
@@ -3950,6 +5205,7 @@ class _ContactTileState extends State<_ContactTile> {
     final confirmed = await _confirmContactAction(
       context: context,
       title: 'Usunąć kontakt na stałe?',
+      message: 'Kontakt zostanie usunięty z aplikacji.',
       actionLabel: 'Usuń',
       actionColor: appDanger,
     );
@@ -3959,48 +5215,37 @@ class _ContactTileState extends State<_ContactTile> {
     }
   }
 
-  Future<void> _confirmArchive(BuildContext context) async {
+  Future<void> _confirmPrimaryAction(BuildContext context) async {
     final confirmed = await _confirmContactAction(
       context: context,
-      title: 'Przenieść kontakt do archiwum?',
-      actionLabel: 'Archiwum',
-      actionColor: appWarning,
-    );
-
-    if (confirmed == true) {
-      await widget.onArchive();
-    }
-  }
-
-  Future<void> _confirmAddToClients(BuildContext context) async {
-    final confirmed = await _confirmContactAction(
-      context: context,
-      title: 'Przenieść kontakt do realizacji?',
-      actionLabel: 'Dodaj',
+      title: 'Umówić spotkanie?',
+      message: 'Kontakt zostanie przeniesiony do sekcji Umówione spotkania.',
+      actionLabel: widget.primaryActionLabel,
       actionColor: appBrand,
     );
 
     if (confirmed == true) {
-      await widget.onAddToClients();
+      await widget.onPrimaryAction();
     }
   }
 
   Future<bool?> _confirmContactAction({
     required BuildContext context,
     required String title,
+    required String message,
     required String actionLabel,
     required Color actionColor,
   }) {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(title),
-        content: const Text('Czy na pewno? Akcji nie można odwrócić.'),
+        titlePadding: const EdgeInsets.fromLTRB(24, 18, 12, 8),
+        title: _DialogTitleWithClose(
+          title: title,
+          onClose: () => Navigator.of(context).pop(false),
+        ),
+        content: Text(message),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Anuluj'),
-          ),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: actionColor),
             onPressed: () => Navigator.of(context).pop(true),
@@ -4012,25 +5257,12 @@ class _ContactTileState extends State<_ContactTile> {
   }
 
   String _contactSubtitle(Contact contact) {
-    if ((contact.status == 'scheduled_meeting' ||
-            contact.status == 'meeting_active' ||
-            contact.status == 'postponed') &&
-        contact.contactDate != null &&
-        contact.contactTime.isNotEmpty) {
-      final parts = [
-        _displayDateTime(contact.contactDate!, contact.contactTime),
-        if (contact.contactQuality.isNotEmpty) contact.contactQuality,
-      ];
-      return parts.join(' | ');
+    if (_stageForContactStatus(contact.status) == 'meeting') {
+      return contact.note;
     }
 
     if (contact.status == 'contact') {
-      final parts = [
-        if (contact.phone.isNotEmpty) contact.phone,
-        if (contact.address.isNotEmpty) contact.address,
-        if (contact.note.isNotEmpty) contact.note,
-      ];
-      return parts.join(' | ');
+      return contact.note;
     }
 
     if (contact.status == 'interested') {
@@ -4045,34 +5277,1039 @@ class _ContactTileState extends State<_ContactTile> {
 
     return contact.note;
   }
+
+  String _meetingCity(String address) {
+    final trimmedAddress = address.trim();
+    if (trimmedAddress.isEmpty) return 'Brak miejscowości';
+    final parts = trimmedAddress
+        .split(',')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.length >= 2) return parts.last;
+    return parts.first;
+  }
+
+  String _meetingDateTimeText(Contact contact) {
+    if (contact.contactDate == null) {
+      return contact.contactTime.isEmpty ? 'Brak terminu' : contact.contactTime;
+    }
+    if (contact.contactTime.isEmpty) return _shortDate(contact.contactDate!);
+    return _displayDateTime(contact.contactDate!, contact.contactTime);
+  }
 }
 
-class _ContactStatusPill extends StatelessWidget {
-  const _ContactStatusPill({required this.status});
+class _DialogTitleWithClose extends StatelessWidget {
+  const _DialogTitleWithClose({required this.title, required this.onClose});
 
-  final ContactStatus status;
+  final String title;
+  final VoidCallback onClose;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 40),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 36,
+            height: 36,
+            child: IconButton(
+              tooltip: 'Zamknij',
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              onPressed: onClose,
+              icon: const Icon(Icons.close, size: 20),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ContactStatusPill extends StatelessWidget {
+  const _ContactStatusPill({required this.status, this.onTap});
+
+  final ContactStatus status;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final pill = Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: status.color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: status.color.withValues(alpha: 0.22)),
       ),
-      child: Text(
-        status.label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            status.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: status.color,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (onTap == null) return pill;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      child: pill,
+    );
+  }
+}
+
+class _ContactTypeDots extends StatelessWidget {
+  const _ContactTypeDots({required this.statuses});
+
+  final List<ContactStatus> statuses;
+
+  @override
+  Widget build(BuildContext context) {
+    if (statuses.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 4),
+        child: Text(
+          'Dodaj typ',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: appTextSecondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      physics: const NeverScrollableScrollPhysics(),
+      child: Row(
+        children: [
+          for (var index = 0; index < statuses.length; index++) ...[
+            if (index > 0) const SizedBox(width: 6),
+            _ContactTypeChoice(type: statuses[index], selected: true),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ContactStatusIconWithLabel extends StatelessWidget {
+  const _ContactStatusIconWithLabel({required this.status});
+
+  final ContactStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          status.icon ?? Icons.label_outline_rounded,
           color: status.color,
-          fontSize: 10,
-          fontWeight: FontWeight.w800,
+          size: 18,
+        ),
+        const SizedBox(width: 10),
+        Flexible(
+          child: Text(
+            status.label,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+Future<String?> _showContactWorkStatusPicker(
+  BuildContext context, {
+  required String? value,
+}) {
+  final statuses = _statusesForStage('contact');
+  final safeValue = statuses.any((status) => status.value == value)
+      ? value
+      : null;
+
+  return showModalBottomSheet<String?>(
+    context: context,
+    useSafeArea: true,
+    builder: (context) {
+      return ValueListenableBuilder<List<ContactStatus>>(
+        valueListenable: _customContactStatusesNotifier,
+        builder: (context, _, child) {
+          final currentStatuses = _statusesForStage('contact');
+
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Status kontaktu',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Zamknij',
+                      onPressed: () => Navigator.of(context).pop(value),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      side: BorderSide(
+                        color: safeValue == null
+                            ? appTextSecondary
+                            : appBorderStrong,
+                      ),
+                    ),
+                    title: const Text(
+                      'Brak statusu',
+                      style: TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    trailing: safeValue == null
+                        ? const Icon(Icons.check, color: appTextSecondary)
+                        : null,
+                    onTap: () => Navigator.of(context).pop(null),
+                  ),
+                ),
+                for (final status in currentStatuses)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(
+                          color: status.value == safeValue
+                              ? status.color
+                              : appBorderStrong,
+                        ),
+                      ),
+                      title: _ContactStatusIconWithLabel(status: status),
+                      trailing: status.value == safeValue
+                          ? Icon(Icons.check, color: status.color)
+                          : null,
+                      onTap: () => Navigator.of(context).pop(status.value),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+Future<List<String>?> _showContactTypesPicker(
+  BuildContext context, {
+  required List<String> selectedValues,
+}) {
+  final types = _statusesForStage('contact_type');
+  if (types.isEmpty) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Dodaj najpierw typ kontaktu w ustawieniach.'),
+        ),
+      );
+    return Future.value(null);
+  }
+
+  return showModalBottomSheet<List<String>>(
+    context: context,
+    useSafeArea: true,
+    builder: (context) {
+      final sheetSelectedValues = [...selectedValues];
+
+      return StatefulBuilder(
+        builder: (context, setSheetState) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Typy kontaktu',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Zamknij',
+                      onPressed: () =>
+                          Navigator.of(context).pop(selectedValues),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                for (final type in types)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(
+                          color: sheetSelectedValues.contains(type.value)
+                              ? type.color
+                              : appBorderStrong,
+                        ),
+                      ),
+                      leading: Container(
+                        width: 14,
+                        height: 14,
+                        decoration: BoxDecoration(
+                          color: type.color,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      title: Text(
+                        type.label,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      trailing: sheetSelectedValues.contains(type.value)
+                          ? Icon(Icons.check, color: type.color)
+                          : null,
+                      onTap: () {
+                        if (sheetSelectedValues.contains(type.value)) {
+                          sheetSelectedValues.remove(type.value);
+                        } else {
+                          if (sheetSelectedValues.length >= 3) {
+                            ScaffoldMessenger.of(context)
+                              ..hideCurrentSnackBar()
+                              ..showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Możesz wybrać maksymalnie 3 typy.',
+                                  ),
+                                ),
+                              );
+                            return;
+                          }
+                          sheetSelectedValues.add(type.value);
+                        }
+                        Navigator.of(context).pop(sheetSelectedValues);
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+class _ContactTypeSelector extends StatelessWidget {
+  const _ContactTypeSelector({
+    required this.selectedValues,
+    required this.onToggle,
+    required this.onOpenSettings,
+  });
+
+  final List<String> selectedValues;
+  final ValueChanged<ContactStatus> onToggle;
+  final VoidCallback onOpenSettings;
+
+  void _showTypePicker(BuildContext context) {
+    final sheetSelectedValues = [...selectedValues];
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) {
+        return ValueListenableBuilder<List<ContactStatus>>(
+          valueListenable: _customContactStatusesNotifier,
+          builder: (context, _, child) {
+            final types = _statusesForStage('contact_type');
+
+            return StatefulBuilder(
+              builder: (context, setSheetState) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Typy kontaktu',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Dodaj typ',
+                            onPressed: () {
+                              Navigator.of(context).pop();
+                              onOpenSettings();
+                            },
+                            icon: const Icon(Icons.add),
+                          ),
+                          IconButton(
+                            tooltip: 'Zamknij',
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (types.isEmpty)
+                        const Text(
+                          'Dodaj typy kontaktów w ustawieniach.',
+                          style: TextStyle(color: appTextSecondary),
+                        )
+                      else
+                        for (final type in types)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                side: BorderSide(
+                                  color:
+                                      sheetSelectedValues.contains(type.value)
+                                      ? type.color
+                                      : appBorderStrong,
+                                ),
+                              ),
+                              leading: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: type.color,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              title: Text(
+                                type.label,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              trailing: sheetSelectedValues.contains(type.value)
+                                  ? Icon(Icons.check, color: type.color)
+                                  : null,
+                              onTap: () {
+                                if (sheetSelectedValues.contains(type.value)) {
+                                  setSheetState(
+                                    () =>
+                                        sheetSelectedValues.remove(type.value),
+                                  );
+                                } else {
+                                  if (sheetSelectedValues.length >= 3) {
+                                    ScaffoldMessenger.of(context)
+                                      ..hideCurrentSnackBar()
+                                      ..showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Możesz wybrać maksymalnie 3 typy.',
+                                          ),
+                                        ),
+                                      );
+                                    return;
+                                  }
+                                  setSheetState(
+                                    () => sheetSelectedValues.add(type.value),
+                                  );
+                                }
+                                onToggle(type);
+                              },
+                            ),
+                          ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final types = _statusesForStage('contact_type');
+    final selectedTypes = [
+      for (final value in selectedValues)
+        for (final type in types)
+          if (type.value == value) type,
+    ];
+    final selectedTypeCount = selectedTypes.length;
+
+    if (types.isEmpty) {
+      return Row(
+        children: [
+          Expanded(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: appSurfaceSoft,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: appBorder),
+              ),
+              child: const Text(
+                'Dodaj typy kontaktów w ustawieniach.',
+                style: TextStyle(color: appTextSecondary, fontSize: 12),
+              ),
+            ),
+          ),
+          if (selectedTypeCount < 3) ...[
+            const SizedBox(width: 8),
+            _ContactTypeAddButton(
+              label: selectedTypeCount == 0 ? 'Dodaj typ' : null,
+              onTap: () => _showTypePicker(context),
+            ),
+          ],
+        ],
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final type in selectedTypes)
+          _ContactTypeChoice(
+            type: type,
+            selected: true,
+            onTap: () => _showTypePicker(context),
+            onLongPress: () => _showTypePicker(context),
+          ),
+        if (selectedTypeCount < 3)
+          _ContactTypeAddButton(
+            label: selectedTypeCount == 0 ? 'Dodaj typ' : null,
+            onTap: () => _showTypePicker(context),
+          ),
+      ],
+    );
+  }
+}
+
+class _ContactTypeAddButton extends StatelessWidget {
+  const _ContactTypeAddButton({required this.onTap, this.label});
+
+  final VoidCallback onTap;
+  final String? label;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = this.label;
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      widthFactor: 1,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: Container(
+          width: label == null ? 32 : 90,
+          height: label == null ? 32 : null,
+          padding: label == null
+              ? EdgeInsets.zero
+              : const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: appSurfaceSoft,
+            shape: label == null ? BoxShape.circle : BoxShape.rectangle,
+            borderRadius: label == null ? null : BorderRadius.circular(999),
+            border: Border.all(color: appBorderStrong),
+          ),
+          child: label == null
+              ? const Icon(Icons.add, size: 18, color: appTextSecondary)
+              : Text(
+                  label,
+                  style: const TextStyle(
+                    color: appTextSecondary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
         ),
       ),
     );
   }
+}
+
+class _ContactTypeChoice extends StatelessWidget {
+  const _ContactTypeChoice({
+    required this.type,
+    required this.selected,
+    this.onTap,
+    this.onLongPress,
+  });
+
+  final ContactStatus type;
+  final bool selected;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(999),
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOutCubic,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected ? type.color.withValues(alpha: 0.14) : appSurfaceSoft,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected ? type.color : appBorderStrong,
+            width: selected ? 1.4 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              type.label,
+              style: TextStyle(
+                color: selected ? type.color : appTextSecondary,
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+Future<ContactStatus?> _showContactTypePicker(
+  BuildContext context, {
+  required String value,
+}) {
+  final types = _statusesForStage('contact_type');
+  if (types.isEmpty) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Dodaj najpierw typ kontaktu w ustawieniach.'),
+        ),
+      );
+    return Future.value(null);
+  }
+  final safeValue = types.any((type) => type.value == value)
+      ? value
+      : types.first.value;
+
+  return showModalBottomSheet<ContactStatus>(
+    context: context,
+    useSafeArea: true,
+    builder: (context) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    'Typ kontaktu',
+                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Zamknij',
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            for (final type in types)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    side: BorderSide(
+                      color: type.value == safeValue
+                          ? type.color
+                          : appBorderStrong,
+                    ),
+                  ),
+                  leading: Container(
+                    width: 14,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: type.color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  title: Text(
+                    type.label,
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  trailing: type.value == safeValue
+                      ? Icon(Icons.check, color: type.color)
+                      : null,
+                  onTap: () => Navigator.of(context).pop(type),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
+class _StatusPickerField extends StatelessWidget {
+  const _StatusPickerField({
+    required this.stage,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String stage;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  Future<void> _openStatusPicker(
+    BuildContext context,
+    List<ContactStatus> statuses,
+  ) {
+    final safeValue = statuses.any((status) => status.value == value)
+        ? value
+        : null;
+
+    return showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) {
+        return ValueListenableBuilder<List<ContactStatus>>(
+          valueListenable: _customContactStatusesNotifier,
+          builder: (context, _, child) {
+            final currentStatuses = _statusesForStage(stage);
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Status kontaktu',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      TextButton.icon(
+                        onPressed: () async {
+                          final created = await showContactStatusEditor(
+                            context,
+                            stage: stage,
+                          );
+                          if (created == null) return;
+                          onChanged(created.value);
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Dodaj status'),
+                      ),
+                      IconButton(
+                        tooltip: 'Zamknij',
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        side: BorderSide(
+                          color: safeValue == null
+                              ? appTextSecondary
+                              : appBorderStrong,
+                        ),
+                      ),
+                      title: const Text(
+                        'Brak statusu',
+                        style: TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      trailing: safeValue == null
+                          ? const Icon(Icons.check, color: appTextSecondary)
+                          : null,
+                      onTap: () {
+                        onChanged(null);
+                        Navigator.of(context).pop();
+                      },
+                    ),
+                  ),
+                  for (final status in currentStatuses)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: ListTile(
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: BorderSide(
+                            color: status.value == safeValue
+                                ? status.color
+                                : appBorderStrong,
+                          ),
+                        ),
+                        title: _ContactStatusIconWithLabel(status: status),
+                        trailing: status.value == safeValue
+                            ? Icon(Icons.check, color: status.color)
+                            : null,
+                        onTap: () {
+                          onChanged(status.value);
+                          Navigator.of(context).pop();
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<List<ContactStatus>>(
+      valueListenable: _customContactStatusesNotifier,
+      builder: (context, _, child) {
+        final statuses = _statusesForStage(stage);
+        final selectedStatus = statuses
+            .where((status) => status.value == value)
+            .firstOrNull;
+        if (statuses.isEmpty) {
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: _ContactTypeAddButton(
+              label: 'Dodaj status',
+              onTap: () async {
+                final created = await showContactStatusEditor(
+                  context,
+                  stage: stage,
+                );
+                if (created == null) return;
+                onChanged(created.value);
+              },
+            ),
+          );
+        }
+
+        return InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: () => _openStatusPicker(context, statuses),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: appSurfaceSoft,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: appBorderStrong),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    selectedStatus?.label ?? 'Brak statusu',
+                    style: TextStyle(
+                      color: selectedStatus?.color ?? appTextSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const Icon(Icons.keyboard_arrow_down, color: appTextSecondary),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+Future<ContactStatus?> showContactStatusEditor(
+  BuildContext context, {
+  required String stage,
+  ContactStatus? status,
+}) async {
+  final nameController = TextEditingController(text: status?.label ?? '');
+  final itemName = stage == 'contact_type' ? 'typ' : 'status';
+  final rootContext = context;
+  var isSaving = false;
+
+  final savedStatus = await showModalBottomSheet<ContactStatus>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (sheetContext) {
+      return StatefulBuilder(
+        builder: (modalContext, setDialogState) {
+          final bottom = MediaQuery.viewInsetsOf(sheetContext).bottom;
+          Future<void> saveAndClose() async {
+            if (isSaving) return;
+            FocusScope.of(modalContext).unfocus();
+            final label = nameController.text.trim();
+            if (label.isEmpty) {
+              ScaffoldMessenger.of(rootContext)
+                ..hideCurrentSnackBar()
+                ..showSnackBar(
+                  SnackBar(content: Text('Wpisz nazwę ${itemName}u.')),
+                );
+              return;
+            }
+
+            setDialogState(() => isSaving = true);
+            final nextStatus = ContactStatus(
+              status?.value ??
+                  'custom_${DateTime.now().microsecondsSinceEpoch}',
+              label,
+              status?.color ?? _automaticStatusColor(stage),
+              stage: stage,
+              isSystem: false,
+            );
+
+            final previousStatuses = [..._customContactStatusesNotifier.value];
+            final statuses = [...previousStatuses];
+            final index = statuses.indexWhere(
+              (item) => item.value == nextStatus.value,
+            );
+            if (index == -1) {
+              statuses.add(nextStatus);
+            } else {
+              statuses[index] = nextStatus;
+            }
+
+            try {
+              await _saveCustomContactStatuses(statuses);
+              if (!modalContext.mounted) return;
+              Navigator.of(modalContext).pop(nextStatus);
+              return;
+            } catch (error) {
+              _customContactStatusesNotifier.value = previousStatuses;
+              if (rootContext.mounted) {
+                ScaffoldMessenger.of(rootContext)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(content: Text('Nie udało się zapisać: $error')),
+                  );
+              }
+            }
+            if (modalContext.mounted) {
+              setDialogState(() => isSaving = false);
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(20, 18, 20, bottom + 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        status == null ? 'Dodaj $itemName' : 'Edytuj $itemName',
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Zamknij',
+                      onPressed: () => Navigator.pop(modalContext),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  decoration: InputDecoration(labelText: 'Nazwa ${itemName}u'),
+                  onSubmitted: (_) => saveAndClose(),
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: isSaving ? null : saveAndClose,
+                  child: Text(isSaving ? 'Zapisuję...' : 'Zapisz'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    },
+  );
+  nameController.dispose();
+  if (savedStatus != null && rootContext.mounted) {
+    ScaffoldMessenger.of(rootContext)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text('Zapisano $itemName.')));
+  }
+
+  return savedStatus;
 }
 
 class _SwipeActionButton extends StatelessWidget {
@@ -4122,8 +6359,11 @@ class _SwipeActionButton extends StatelessWidget {
   }
 }
 
-Future<void> showContactDetailsSheet(BuildContext context, Contact contact) {
-  return showModalBottomSheet<void>(
+Future<Contact?> showContactDetailsSheet(
+  BuildContext context,
+  Contact contact,
+) {
+  return showModalBottomSheet<Contact>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
@@ -4146,6 +6386,8 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
   late final TextEditingController _addressController;
   late final TextEditingController _noteController;
   late String _status;
+  String? _contactWorkStatus;
+  late List<String> _contactTypes;
   late DateTime _contactDate;
   late TimeOfDay _contactTime;
   String? _contactQuality;
@@ -4160,15 +6402,35 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     _phoneController = TextEditingController(text: contact.phone);
     _addressController = TextEditingController(text: contact.address);
     _noteController = TextEditingController(text: contact.note);
-    _status = contact.status == 'signed_contract'
+    final initialStatus = contact.status == 'signed_contract'
         ? 'scheduled_meeting'
         : contact.status;
+    final initialStage = _stageForContactStatus(initialStatus);
+    final stageStatuses = _statusesForStage(initialStage);
+    _status = initialStage == 'contact'
+        ? 'contact'
+        : stageStatuses.any((status) => status.value == initialStatus)
+        ? initialStatus
+        : stageStatuses.first.value;
+    final contactStatuses = _statusesForStage('contact');
+    _contactWorkStatus =
+        contact.contactStatus != null &&
+            contactStatuses.any(
+              (status) => status.value == contact.contactStatus,
+            )
+        ? contact.contactStatus
+        : null;
     _contactDate =
         contact.contactDate ?? DateTime.now().add(const Duration(days: 1));
     _contactTime = _timeOfDayFromText(contact.contactTime);
     _contactQuality = contact.contactQuality.isEmpty
         ? null
         : contact.contactQuality;
+    _contactTypes = _contactTypeValuesFromRaw(
+      contact.contactType.isNotEmpty
+          ? contact.contactType
+          : contact.contactQuality,
+    );
   }
 
   @override
@@ -4189,16 +6451,23 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         'contact_name': _nameController.text.trim(),
         'phone': _phoneController.text.trim(),
         'address': _addressController.text.trim(),
-        'status': _status,
+        'status': _stageForContactStatus(_status) == 'contact'
+            ? 'contact'
+            : _status,
+        'contact_status': _stageForContactStatus(_status) == 'contact'
+            ? _contactWorkStatus
+            : null,
         'note': _noteController.text.trim(),
         'contact_date': null,
         'contact_time': null,
         'meeting_time': null,
-        'contact_quality': null,
         'contact_notification': null,
+        'contact_type': _contactTypes.isEmpty
+            ? null
+            : _contactTypeValuesToRaw(_contactTypes),
       };
 
-      if (_status == 'scheduled_meeting') {
+      if (_stageForContactStatus(_status) == 'meeting') {
         payload.addAll({
           'contact_date': _dateOnly(_contactDate),
           'contact_time': _timeOnly(_contactTime),
@@ -4207,10 +6476,18 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         });
       }
 
-      await _supabase.from('contacts').update(payload).eq('id', contact.id);
+      final updatedData = await _supabase
+          .from('contacts')
+          .update(payload)
+          .eq('id', contact.id)
+          .select()
+          .single();
 
       if (!mounted) return;
-      Navigator.of(context).pop();
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      Navigator.of(context).pop(updatedContact);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Kontakt został zapisany.')));
@@ -4229,9 +6506,17 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
 
     setState(() => _isSaving = true);
     try {
-      await _supabase.from('contacts').update(payload).eq('id', contact.id);
+      final updatedData = await _supabase
+          .from('contacts')
+          .update(payload)
+          .eq('id', contact.id)
+          .select()
+          .single();
       if (!mounted) return;
-      Navigator.of(context).pop();
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      Navigator.of(context).pop(updatedContact);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kontakt został zaktualizowany.')),
       );
@@ -4245,11 +6530,25 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     }
   }
 
-  Future<void> _startMeeting() async {
-    await _updateContact({
-      'status': 'meeting_active',
-      'note': _mergeNote('Start spotkania: ${_formatDuration(Duration.zero)}'),
-    });
+  Future<void> _deleteCurrentContact() async {
+    if (_isSaving) return;
+
+    setState(() => _isSaving = true);
+    try {
+      await _supabase.from('contacts').delete().eq('id', contact.id);
+      if (!mounted) return;
+      Navigator.of(context).pop(contact.copyWith(status: 'not_interested'));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Kontakt został usunięty.')));
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
   }
 
   Future<void> _postponeMeeting() async {
@@ -4309,86 +6608,113 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     );
   }
 
-  Future<void> _finishMeeting() async {
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Jaki jest wynik spotkania?'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _MeetingResultButton(
-              icon: Icons.assignment_turned_in_outlined,
-              label: 'Spisana umowa',
-              color: appSuccess,
-              onTap: () => Navigator.pop(context, 'signed_contract'),
-            ),
-            const SizedBox(height: 10),
-            _MeetingResultButton(
-              icon: Icons.trending_up_outlined,
-              label: 'Zainteresowany',
-              color: appInfo,
-              onTap: () => Navigator.pop(context, 'interested'),
-            ),
-            const SizedBox(height: 10),
-            _MeetingResultButton(
-              icon: Icons.do_not_disturb_on_outlined,
-              label: 'Nie zainteresowany',
-              color: appDanger,
-              onTap: () => Navigator.pop(context, 'not_interested'),
-            ),
-          ],
-        ),
-      ),
+  Future<void> _finishNotSold() async {
+    final reason = await _askReason(
+      title: 'Dlaczego niesprzedane?',
+      reasons: _notSoldReasons,
     );
+    if (reason == null || !mounted) return;
 
-    if (result == null || !mounted) return;
+    final insight = await _askText(
+      title: 'Wnioski na przyszłość',
+      label: 'Co następnym razem zrobić lepiej?',
+      primaryLabel: 'Dalej',
+      secondaryLabel: 'Pomiń',
+      allowEmpty: true,
+    );
+    if (insight == null || !mounted) return;
 
-    if (result == 'signed_contract') {
-      await _finishSignedContract();
-    } else if (result == 'interested') {
+    final isWaitingForDecision = reason == 'Czeka na decyzję';
+    final reminderDate = isWaitingForDecision
+        ? await _askReminderDate(title: 'Kiedy wrócić do decyzji?')
+        : null;
+    if (isWaitingForDecision && (reminderDate == null || !mounted)) return;
+
+    if (isWaitingForDecision) {
       await _updateContact({
-        'status': 'interested',
-        'note': _mergeNote(
-          'Wynik spotkania: zainteresowany. Wrócić z kontekstową sugestią.',
-        ),
+        'status': 'scheduled_meeting',
+        'meeting_result': 'interested',
+        'not_interested_reason': _meetingReasonSummary(reason, insight),
+        'contact_notification': reminderDate?.toIso8601String(),
+        'note': _mergeNote('Wynik spotkania: nie sprzedane.'),
       });
-    } else {
-      await _finishNotInterested();
+      return;
     }
+
+    final nextAction = await _askNotSoldNextAction();
+    if (nextAction == null || !mounted) return;
+
+    await _updateContact({
+      'status': nextAction == 'return_to_contacts' ? 'contact' : 'meeting_done',
+      'meeting_result': 'missed',
+      'not_interested_reason': _meetingReasonSummary(reason, insight),
+      'contact_notification': null,
+      'contact_status': nextAction == 'return_to_contacts'
+          ? _contactWorkStatus
+          : null,
+      'note': _mergeNote('Wynik spotkania: nie sprzedane.'),
+    });
   }
 
-  Future<void> _finishSignedContract() async {
-    final confirmed = await showDialog<bool>(
+  Future<void> _finishMissedMeeting() async {
+    final shouldPostpone = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Przenieść do W realizacji?'),
-        content: const Text(
-          'Spotkanie zostanie zapisane jako odbyte i z umową.',
-        ),
+        title: const Text('Przekładamy?'),
+        content: const Text('Spotkanie się nie odbyło. Co robimy dalej?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Nie teraz'),
+            child: const Text('Nie'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Przenieś'),
+            child: const Text('Tak'),
           ),
         ],
       ),
     );
 
-    if (confirmed == true) {
-      await _moveContactToClients();
+    if (shouldPostpone == null || !mounted) return;
+    if (shouldPostpone) {
+      await _postponeMeeting();
+      return;
+    }
+
+    final nextAction = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Co robimy?'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'delete'),
+            child: const Text('Usuń'),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'remember_meeting'),
+            child: const Text('Zapamiętaj spotkanie'),
+          ),
+        ],
+      ),
+    );
+
+    if (nextAction == null || !mounted) return;
+    if (nextAction == 'delete') {
+      await _deleteCurrentContact();
       return;
     }
 
     await _updateContact({
-      'status': 'signed_contract',
-      'note': _mergeNote('Wynik spotkania: spisana umowa.'),
+      'status': 'meeting_done',
+      'meeting_result': 'missed',
+      'not_interested_reason': 'Nieodbyte',
+      'contact_notification': null,
+      'note': _mergeNote('Wynik spotkania: nieodbyte.'),
     });
+  }
+
+  Future<void> _finishSignedContract() async {
+    await _moveContactToClients();
   }
 
   Future<void> _moveContactToClients() async {
@@ -4410,7 +6736,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         'status': 'signed_contract',
       });
 
-      await _supabase
+      final updatedData = await _supabase
           .from('contacts')
           .update({
             'status': 'signed_contract',
@@ -4419,10 +6745,15 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
               'Wynik spotkania: spisana umowa. Przeniesiono do W realizacji.',
             ),
           })
-          .eq('id', contact.id);
+          .eq('id', contact.id)
+          .select()
+          .single();
 
       if (!mounted) return;
-      Navigator.of(context).pop();
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      Navigator.of(context).pop(updatedContact);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kontakt przeniesiony do W realizacji.')),
       );
@@ -4436,13 +6767,16 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     }
   }
 
-  Future<void> _finishNotInterested() async {
+  Future<String?> _askReason({
+    required String title,
+    required List<String> reasons,
+  }) async {
     final reason = await showDialog<String>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: const Text('Jaki powód?'),
+        title: Text(title),
         children: [
-          for (final reason in _notInterestedReasons)
+          for (final reason in reasons)
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, reason),
               child: Text(reason),
@@ -4451,15 +6785,106 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
       ),
     );
 
-    if (reason == null || !mounted) return;
-    final shouldArchive = reason == 'Cena' || reason == 'Beton';
-    await _updateContact({
-      'status': shouldArchive ? 'not_interested' : 'interested',
-      'archived_at': shouldArchive ? DateTime.now().toIso8601String() : null,
-      'note': _mergeNote(
-        'Wynik spotkania: nie zainteresowany. Powód: $reason.',
+    if (reason != 'Inne' || !mounted) return reason;
+
+    final controller = TextEditingController();
+    final customReason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Wpisz powód'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(labelText: 'Powód'),
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              Navigator.pop(context, value.isEmpty ? null : value);
+            },
+            child: const Text('Dalej'),
+          ),
+        ],
       ),
-    });
+    );
+    controller.dispose();
+    return customReason;
+  }
+
+  Future<String?> _askText({
+    required String title,
+    required String label,
+    required String primaryLabel,
+    String? secondaryLabel,
+    bool allowEmpty = false,
+  }) async {
+    final controller = TextEditingController();
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          minLines: 2,
+          maxLines: 4,
+          decoration: InputDecoration(labelText: label),
+        ),
+        actions: [
+          if (secondaryLabel != null)
+            TextButton(
+              onPressed: () => Navigator.pop(context, ''),
+              child: Text(secondaryLabel),
+            ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (!allowEmpty && text.isEmpty) return;
+              Navigator.pop(context, text);
+            },
+            child: Text(primaryLabel),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return value;
+  }
+
+  String _meetingReasonSummary(String reason, String insight) {
+    final trimmedInsight = insight.trim();
+    if (trimmedInsight.isEmpty) return reason;
+    return '$reason | Wnioski: $trimmedInsight';
+  }
+
+  Future<String?> _askNotSoldNextAction() {
+    return showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Co dalej z kontaktem?'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'remember_meeting'),
+            child: const Text('Zapamiętaj spotkanie'),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'return_to_contacts'),
+            child: const Text('Wróć do kontaktów'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<DateTime?> _askReminderDate({required String title}) {
+    return showDatePicker(
+      context: context,
+      initialDate: DateTime.now().add(const Duration(days: 7)),
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: title,
+    );
   }
 
   String _mergeNote(String _) {
@@ -4495,10 +6920,52 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     setState(() => _contactTime = picked);
   }
 
+  Future<void> _toggleContactType(ContactStatus type) async {
+    final nextTypes = [..._contactTypes];
+    if (nextTypes.contains(type.value)) {
+      nextTypes.remove(type.value);
+    } else {
+      if (nextTypes.length >= 3) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('Możesz wybrać maksymalnie 3 typy.')),
+          );
+        return;
+      }
+      nextTypes.add(type.value);
+    }
+
+    setState(() => _contactTypes = nextTypes);
+
+    try {
+      await _supabase
+          .from('contacts')
+          .update({
+            'contact_type': nextTypes.isEmpty
+                ? null
+                : _contactTypeValuesToRaw(nextTypes),
+          })
+          .eq('id', contact.id)
+          .select()
+          .single();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('Typ kontaktu zapisany.')));
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final status = _statusByValue(_status);
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final isMeeting = _stageForContactStatus(_status) == 'meeting';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 20, 20, bottom + 24),
@@ -4508,7 +6975,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 CircleAvatar(
                   radius: 24,
@@ -4528,16 +6995,35 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                         style: Theme.of(context).textTheme.headlineSmall
                             ?.copyWith(fontWeight: FontWeight.w900),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        status.label,
-                        style: TextStyle(
-                          color: status.color,
-                          fontWeight: FontWeight.w800,
+                      if (isMeeting &&
+                          contact.contactDate != null &&
+                          contact.contactTime.isNotEmpty)
+                        const SizedBox(height: 4),
+                      if (isMeeting &&
+                          contact.contactDate != null &&
+                          contact.contactTime.isNotEmpty)
+                        Text(
+                          _displayDateTime(
+                            contact.contactDate!,
+                            contact.contactTime,
+                          ),
+                          style: const TextStyle(
+                            color: appTextSecondary,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                      ),
                     ],
                   ),
+                ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Zamknij',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -4567,27 +7053,30 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                   ),
               ],
             ),
+            if (!isMeeting) ...[
+              const SizedBox(height: 10),
+              _ContactTypeSelector(
+                selectedValues: _contactTypes,
+                onToggle: _toggleContactType,
+                onOpenSettings: () =>
+                    _pushSettingsSubpage(context, const ContactStatusesPage()),
+              ),
+            ],
             if (_status == 'scheduled_meeting' ||
                 _status == 'meeting_active' ||
                 _status == 'postponed') ...[
               const SizedBox(height: 12),
               _MeetingActionPanel(
-                status: _status,
-                onStart: _startMeeting,
-                onFinish: _finishMeeting,
+                onSold: _finishSignedContract,
+                onNotSold: _finishNotSold,
                 onPostpone: _postponeMeeting,
-                onArchive: () => _updateContact({
-                  'archived_at': DateTime.now().toIso8601String(),
-                  'note': _mergeNote(
-                    'Kontakt zamknięty i przeniesiony do archiwum.',
-                  ),
-                }),
+                onMissed: _finishMissedMeeting,
               ),
             ],
             const SizedBox(height: 18),
             TextField(
               controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Dane kontaktu'),
+              decoration: const InputDecoration(labelText: 'Imię i nazwisko'),
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 12),
@@ -4603,23 +7092,17 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
               decoration: const InputDecoration(labelText: 'Adres'),
               onChanged: (_) => setState(() {}),
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: _status,
-              decoration: const InputDecoration(labelText: 'Status'),
-              items: [
-                for (final status in _contactStatuses)
-                  DropdownMenuItem(
-                    value: status.value,
-                    child: Text(status.label),
-                  ),
-              ],
-              onChanged: (value) {
-                if (value == null) return;
-                setState(() => _status = value);
-              },
-            ),
-            if (_status == 'scheduled_meeting') ...[
+
+            if (!isMeeting) ...[
+              const SizedBox(height: 12),
+              _StatusPickerField(
+                stage: 'contact',
+                value: _contactWorkStatus,
+                onChanged: (value) =>
+                    setState(() => _contactWorkStatus = value),
+              ),
+            ],
+            if (isMeeting) ...[
               const SizedBox(height: 12),
               _MeetingFields(
                 date: _contactDate,
@@ -4691,130 +7174,109 @@ class _DetailRow extends StatelessWidget {
 
 class _MeetingActionPanel extends StatelessWidget {
   const _MeetingActionPanel({
-    required this.status,
-    required this.onStart,
-    required this.onFinish,
+    required this.onSold,
+    required this.onNotSold,
     required this.onPostpone,
-    required this.onArchive,
+    required this.onMissed,
   });
 
-  final String status;
-  final VoidCallback onStart;
-  final VoidCallback onFinish;
+  final VoidCallback onSold;
+  final VoidCallback onNotSold;
   final VoidCallback onPostpone;
-  final VoidCallback onArchive;
+  final VoidCallback onMissed;
 
   @override
   Widget build(BuildContext context) {
-    final isActive = status == 'meeting_active';
-    final title = isActive ? 'Spotkanie trwa...' : 'Co robimy ze spotkaniem?';
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: appSurfaceSoft,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: appBorder),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isActive
-                    ? Icons.timer_outlined
-                    : Icons.event_available_outlined,
-                color: appBrand,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ],
+    return Row(
+      children: [
+        Expanded(
+          child: _MeetingQuickActionTile(
+            label: 'Sprzedane',
+            icon: Icons.check,
+            color: appSuccess,
+            onTap: onSold,
           ),
-          const SizedBox(height: 10),
-          if (isActive)
-            FilledButton.icon(
-              onPressed: onFinish,
-              icon: const Icon(Icons.flag_outlined),
-              label: const Text('Zakończ spotkanie'),
-            )
-          else
-            FilledButton.icon(
-              onPressed: onStart,
-              icon: const Icon(Icons.play_arrow_rounded),
-              label: const Text('Start spotkania'),
-            ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onPostpone,
-                  icon: const Icon(Icons.update_outlined),
-                  label: const Text('Przełóż'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onArchive,
-                  icon: const Icon(Icons.archive_outlined),
-                  label: const Text('Archiwum'),
-                ),
-              ),
-            ],
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _MeetingQuickActionTile(
+            label: 'Nie sprzedane',
+            icon: Icons.warning_amber_rounded,
+            color: const Color(0xFFF0A202),
+            onTap: onNotSold,
           ),
-        ],
-      ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _MeetingQuickActionTile(
+            label: 'Przełożone',
+            icon: Icons.arrow_forward_rounded,
+            color: appInfo,
+            onTap: onPostpone,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _MeetingQuickActionTile(
+            label: 'Nieodbyte',
+            icon: Icons.close,
+            color: appDanger,
+            onTap: onMissed,
+          ),
+        ),
+      ],
     );
   }
 }
 
-class _MeetingResultButton extends StatelessWidget {
-  const _MeetingResultButton({
-    required this.icon,
+class _MeetingQuickActionTile extends StatelessWidget {
+  const _MeetingQuickActionTile({
     required this.label,
+    required this.icon,
     required this.color,
     required this.onTap,
   });
 
-  final IconData icon;
   final String label;
+  final IconData icon;
   final Color color;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: color.withValues(alpha: 0.10),
-      borderRadius: BorderRadius.circular(8),
-      child: InkWell(
+    return AspectRatio(
+      aspectRatio: 1,
+      child: Material(
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(8),
-        onTap: onTap,
-        child: Container(
-          constraints: const BoxConstraints(minHeight: 58),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withValues(alpha: 0.24)),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: color.withValues(alpha: 0.35)),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(icon, color: color, size: 24),
+                const SizedBox(height: 6),
+                Text(
                   label,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: color,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    height: 1.05,
+                  ),
                 ),
-              ),
-              Icon(Icons.chevron_right, color: color),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -4844,19 +7306,13 @@ class _StatsData {
 class _StatsTileData {
   const _StatsTileData({
     required this.id,
-    required this.title,
+    required this.displayTitle,
     required this.value,
-    required this.subtitle,
-    required this.icon,
-    required this.color,
   });
 
   final String id;
-  final String title;
+  final String displayTitle;
   final String value;
-  final String subtitle;
-  final IconData icon;
-  final Color color;
 }
 
 class _StatsRange {
@@ -4920,8 +7376,15 @@ class _StatisticsPageState extends State<StatisticsPage> {
     }
   }
 
-  void _reload() {
-    setState(() => _statsFuture = _fetchStatsData());
+  Future<void> _reload() async {
+    try {
+      final data = await _fetchStatsData().timeout(_manualRefreshTimeout);
+      if (!mounted) return;
+      setState(() => _statsFuture = Future.value(data));
+    } catch (error) {
+      if (!mounted) return;
+      _ignoreManualRefreshError(error);
+    }
   }
 
   @override
@@ -4964,8 +7427,9 @@ class _StatisticsPageState extends State<StatisticsPage> {
           );
 
           return RefreshIndicator(
-            onRefresh: () async => _reload(),
+            onRefresh: _reload,
             child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 96),
               children: [
                 _StatsRangeSelector(
@@ -4977,45 +7441,30 @@ class _StatisticsPageState extends State<StatisticsPage> {
                   tiles: [
                     _StatsTileData(
                       id: 'contacts',
-                      title: 'Dodane kontakty',
+                      displayTitle: 'Dodane kontakty',
                       value: contacts.length.toString(),
-                      subtitle: 'Aktywne kontakty',
-                      icon: Icons.groups,
-                      color: appBrand,
                     ),
                     _StatsTileData(
                       id: 'clients',
-                      title: 'W realizacji',
+                      displayTitle: 'W realizacji',
                       value: clients.length.toString(),
-                      subtitle: 'Aktywne sprawy',
-                      icon: Icons.precision_manufacturing,
-                      color: appInfo,
                     ),
                     _StatsTileData(
                       id: 'signed_clients',
-                      title: 'Spisani klienci',
+                      displayTitle: 'Spisani klienci',
                       value: signedClients.toString(),
-                      subtitle: 'Spisana umowa',
-                      icon: Icons.assignment_turned_in,
-                      color: const Color(0xFF8A6F20),
                     ),
                     _StatsTileData(
                       id: 'lead_time',
-                      title: 'Czas leadowania',
+                      displayTitle: 'Czas leadowania',
                       value: _formatDuration(
                         Duration(seconds: totalLeadSeconds),
                       ),
-                      subtitle: 'Łącznie',
-                      icon: Icons.timer_outlined,
-                      color: appMuted,
                     ),
                     _StatsTileData(
                       id: 'lead_sessions',
-                      title: 'Sesje leadowania',
+                      displayTitle: 'Sesje leadowania',
                       value: leadSessions.length.toString(),
-                      subtitle: 'Ile razy agent leadował',
-                      icon: Icons.route_outlined,
-                      color: appDanger,
                     ),
                   ],
                 ),
@@ -5094,33 +7543,25 @@ class _StatsTile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Icon(tile.icon, color: tile.color, size: 22),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        tile.title,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 18),
                 Text(
-                  tile.value,
-                  style: Theme.of(context).textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    height: 1,
+                  tile.displayTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: appTextPrimary,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    height: 1.15,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 12),
                 Text(
-                  tile.subtitle,
+                  tile.value,
                   style: const TextStyle(
-                    color: appTextSecondary,
-                    fontWeight: FontWeight.w700,
+                    color: appTextPrimary,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
                   ),
                 ),
               ],
@@ -5179,199 +7620,26 @@ class _StatsGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      childAspectRatio: 1.18,
-      crossAxisSpacing: 10,
-      mainAxisSpacing: 10,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      children: [
-        for (final tile in tiles) _StatsTile(tile: tile, onTap: () {}),
-      ],
-    );
-  }
-}
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final aspectRatio = constraints.maxWidth < 380
+            ? 0.78
+            : constraints.maxWidth < 520
+            ? 0.9
+            : 1.05;
 
-class ArchivedContactsPage extends StatefulWidget {
-  const ArchivedContactsPage({super.key});
-
-  @override
-  State<ArchivedContactsPage> createState() => _ArchivedContactsPageState();
-}
-
-class _ArchivedContactsPageState extends State<ArchivedContactsPage> {
-  late Future<List<Contact>> _contactsFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _contactsFuture = _fetchArchivedContacts();
-  }
-
-  Future<List<Contact>> _fetchArchivedContacts() async {
-    final data = await _supabase
-        .from('contacts')
-        .select()
-        .not('archived_at', 'is', null)
-        .isFilter('moved_to_client_at', null);
-
-    return (data as List)
-        .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
-        .toList();
-  }
-
-  void _reload() {
-    setState(() => _contactsFuture = _fetchArchivedContacts());
-  }
-
-  Future<void> _restoreContact(Contact contact) async {
-    await _supabase
-        .from('contacts')
-        .update({'archived_at': null})
-        .eq('id', contact.id);
-    _reload();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: appBackground,
-      appBar: AppBar(
-        centerTitle: false,
-        leading: IconButton(
-          tooltip: 'Wróć',
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.arrow_back),
-        ),
-        title: const Row(
+        return GridView.count(
+          crossAxisCount: 2,
+          childAspectRatio: aspectRatio,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
           children: [
-            Icon(Icons.archive_outlined, color: appBrand, size: 22),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Archiwum kontaktów',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ),
+            for (final tile in tiles) _StatsTile(tile: tile, onTap: () {}),
           ],
-        ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, thickness: 1, color: appBorder),
-        ),
-      ),
-      body: _PageShell(
-        child: FutureBuilder<List<Contact>>(
-          future: _contactsFuture,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            if (snapshot.hasError) {
-              return _EmptyState(
-                icon: Icons.error_outline,
-                text: 'Nie udało się pobrać archiwum.',
-                detail: snapshot.error.toString(),
-              );
-            }
-
-            final contacts = snapshot.data ?? [];
-            if (contacts.isEmpty) {
-              return const _EmptyState(
-                icon: Icons.archive_outlined,
-                text: 'Archiwum jest puste.',
-                detail: 'Zarchiwizowane kontakty pojawią się tutaj.',
-              );
-            }
-
-            return RefreshIndicator(
-              onRefresh: () async => _reload(),
-              child: ListView.separated(
-                padding: const EdgeInsets.only(bottom: 28),
-                itemCount: contacts.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 10),
-                itemBuilder: (context, index) {
-                  final contact = contacts[index];
-                  return _ArchivedContactTile(
-                    contact: contact,
-                    onRestore: () => _restoreContact(contact),
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _ArchivedContactTile extends StatelessWidget {
-  const _ArchivedContactTile({required this.contact, required this.onRestore});
-
-  final Contact contact;
-  final Future<void> Function() onRestore;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = _statusByValue(contact.status);
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: appSurface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: appBorder),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: status.color.withValues(alpha: 0.14),
-            foregroundColor: status.color,
-            child: Text(_initials(contact.contactName)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  contact.contactName.isEmpty
-                      ? 'Bez nazwy'
-                      : contact.contactName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  [
-                    status.label,
-                    if (contact.phone.isNotEmpty) contact.phone,
-                    if (contact.address.isNotEmpty) contact.address,
-                  ].join(' | '),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: appTextSecondary),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            onPressed: onRestore,
-            icon: const Icon(Icons.restore_outlined, size: 18),
-            label: const Text('Przywróć'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -5384,60 +7652,19 @@ class AccountPage extends StatefulWidget {
 }
 
 class _AccountPageState extends State<AccountPage> {
-  bool _meetingReminders = false;
-  bool _phoneReminders = true;
-  bool _visitReminders = true;
-  bool _inAppNotifications = true;
-  bool _pushNotifications = false;
-  bool _emailNotifications = false;
-  bool _salesMeetingNotifications = true;
-  bool _dashboardPersonalization = true;
-  bool _dashboardVisibleSections = true;
-  bool _dashboardSectionOrder = true;
-  bool _emailReports = false;
-  bool _weeklyReports = false;
-  bool _monthlyReports = false;
-  bool _autoRecordMeetings = true;
+  int _leadCycleCount = 2;
+  bool _showWeeklyGoal = true;
+  bool _productPanels = true;
+  bool _productStorage = true;
+  bool _productRoofs = false;
+  bool _productSets = false;
+  bool _productInsulation = false;
+  bool _productHeating = false;
+  bool _productWindTurbines = false;
   int _defaultLeadGoal = 9;
 
-  void _showOnboardingPreview() {
-    showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => const _OnboardingPreviewDialog(),
-    );
-  }
-
-  void _openArchivedContacts() {
-    Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return const ArchivedContactsPage();
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          final curvedAnimation = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1, 0),
-              end: Offset.zero,
-            ).animate(curvedAnimation),
-            child: FadeTransition(opacity: curvedAnimation, child: child),
-          );
-        },
-      ),
-    );
-  }
-
-  void _openUnprocessedMeetings() {
-    _openSettingsCategory(
-      title: 'Nieprzerobione spotkania',
-      icon: Icons.pending_actions_outlined,
-      children: const [_UnprocessedMeetingsList()],
-    );
+  void _pushAccountPage(Widget page) {
+    _pushSettingsSubpage(context, page);
   }
 
   void _openSettingsCategory({
@@ -5445,30 +7672,8 @@ class _AccountPageState extends State<AccountPage> {
     required IconData icon,
     required List<Widget> children,
   }) {
-    Navigator.of(context).push(
-      PageRouteBuilder<void>(
-        pageBuilder: (context, animation, secondaryAnimation) {
-          return _SettingsDetailPage(
-            title: title,
-            icon: icon,
-            children: children,
-          );
-        },
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          final curvedAnimation = CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutCubic,
-            reverseCurve: Curves.easeInCubic,
-          );
-          return SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(1, 0),
-              end: Offset.zero,
-            ).animate(curvedAnimation),
-            child: FadeTransition(opacity: curvedAnimation, child: child),
-          );
-        },
-      ),
+    _pushAccountPage(
+      _SettingsDetailPage(title: title, icon: icon, children: children),
     );
   }
 
@@ -5552,21 +7757,30 @@ class _AccountPageState extends State<AccountPage> {
     setState(() => _defaultLeadGoal = value);
   }
 
-  void _showAiInstructionPlaceholder() {
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Instrukcja dla agenta AI'),
-        content: const Text(
-          'To będzie miejsce na instrukcję, według której aplikacja analizuje lokalne nagrania i wyciąga konkluzje dla agenta.',
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+  Future<void> _signOut() async {
+    final signOutFuture = _supabase.auth.signOut(scope: SignOutScope.local);
+    _authRefreshNotifier.value++;
+
+    if (!mounted) return;
+    Navigator.of(
+      context,
+      rootNavigator: true,
+    ).popUntil((route) => route.isFirst);
+
+    unawaited(
+      signOutFuture
+          .then<void>((_) {
+            _authRefreshNotifier.value++;
+          })
+          .catchError((Object error) {
+            if (!mounted) return;
+            final message = error is AuthException
+                ? error.message
+                : 'Nie udało się wylogować. Spróbuj ponownie.';
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(message)));
+          }),
     );
   }
 
@@ -5576,413 +7790,831 @@ class _AccountPageState extends State<AccountPage> {
     final email = user?.email ?? '';
     final name = _userDisplayName(user);
 
-    return _PageShell(
-      child: ListView(
-        padding: const EdgeInsets.only(bottom: 22),
-        children: [
-          ValueListenableBuilder<String?>(
-            valueListenable: _avatarPathNotifier,
-            builder: (context, avatarPath, _) {
-              return _AccountHeader(
-                name: name,
-                email: email,
-                initials: _userInitials(user),
-                avatarPath: avatarPath,
-                onAvatarTap: _showAvatarOptions,
+    return Stack(
+      children: [
+        Positioned.fill(
+          top: 72,
+          child: _PageShell(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 460),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            ValueListenableBuilder<String?>(
+                              valueListenable: _avatarPathNotifier,
+                              builder: (context, avatarPath, _) {
+                                return _AccountHeader(
+                                  name: name,
+                                  email: email,
+                                  initials: _userInitials(user),
+                                  avatarPath: avatarPath,
+                                  onAvatarTap: _showAvatarOptions,
+                                );
+                              },
+                            ),
+                            const SizedBox(height: 14),
+                            _SettingsCategoryTile(
+                              icon: Icons.person_outline,
+                              title: 'Konto',
+                              subtitle: 'Dane agenta i wylogowanie',
+                              onTap: () => _openSettingsCategory(
+                                title: 'Konto',
+                                icon: Icons.person_outline,
+                                children: [
+                                  _SettingsRow(
+                                    icon: Icons.badge_outlined,
+                                    label: 'Imię i nazwisko',
+                                    value: name,
+                                  ),
+                                  _SettingsRow(
+                                    icon: Icons.alternate_email_outlined,
+                                    label: 'Adres e-mail',
+                                    value: email.isEmpty
+                                        ? 'Brak e-maila'
+                                        : email,
+                                  ),
+                                  const _SettingsRow(
+                                    icon: Icons.phone_outlined,
+                                    label: 'Numer telefonu',
+                                    value: 'Opcjonalny',
+                                  ),
+                                  const _SettingsRow(
+                                    icon: Icons.confirmation_number_outlined,
+                                    label: 'Numer agenta',
+                                    value: 'Do uzupełnienia',
+                                  ),
+                                  _SettingsAction(
+                                    icon: Icons.logout_outlined,
+                                    label: 'Wyloguj',
+                                    onTap: _signOut,
+                                  ),
+                                  _SettingsAction(
+                                    icon: Icons.delete_forever_outlined,
+                                    label: 'Usuń konto',
+                                    destructive: true,
+                                    onTap: () {},
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _SettingsCategoryTile(
+                              icon: Icons.directions_walk,
+                              title: 'System pracy - leadowanie',
+                              subtitle: 'Cykle i cele spotkań',
+                              onTap: () => _openSettingsCategory(
+                                title: 'System pracy - leadowanie',
+                                icon: Icons.directions_walk,
+                                children: [
+                                  _SettingsRow(
+                                    icon: Icons.repeat_outlined,
+                                    label: 'Ilość cykli',
+                                    value: '$_leadCycleCount',
+                                  ),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () => setState(
+                                            () => _leadCycleCount = 2,
+                                          ),
+                                          child: const Text('2 cykle'),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: () => setState(
+                                            () => _leadCycleCount = 3,
+                                          ),
+                                          child: const Text('3 cykle'),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                  _SettingsAction(
+                                    icon: Icons.flag_outlined,
+                                    label:
+                                        'Il. um. spotkań - cel: $_defaultLeadGoal',
+                                    onTap: _editDefaultLeadGoal,
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.calendar_view_week_outlined,
+                                    label: 'Pokazywać cel tygodniowy?',
+                                    value: _showWeeklyGoal,
+                                    onChanged: (value) =>
+                                        setState(() => _showWeeklyGoal = value),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _SettingsCategoryTile(
+                              icon: Icons.handshake_outlined,
+                              title: 'Sprzedaż',
+                              subtitle: 'Produkty',
+                              onTap: () => _openSettingsCategory(
+                                title: 'Sprzedaż',
+                                icon: Icons.handshake_outlined,
+                                children: [
+                                  _SettingsSwitch(
+                                    icon: Icons.solar_power_outlined,
+                                    label: 'Panele',
+                                    value: _productPanels,
+                                    onChanged: (value) =>
+                                        setState(() => _productPanels = value),
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.battery_charging_full_outlined,
+                                    label: 'Magazyny',
+                                    value: _productStorage,
+                                    onChanged: (value) =>
+                                        setState(() => _productStorage = value),
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.roofing_outlined,
+                                    label: 'Dachy',
+                                    value: _productRoofs,
+                                    onChanged: (value) =>
+                                        setState(() => _productRoofs = value),
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.widgets_outlined,
+                                    label: 'Zestawy',
+                                    value: _productSets,
+                                    onChanged: (value) =>
+                                        setState(() => _productSets = value),
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.texture_outlined,
+                                    label: 'Ocieplenia',
+                                    value: _productInsulation,
+                                    onChanged: (value) => setState(
+                                      () => _productInsulation = value,
+                                    ),
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.thermostat_outlined,
+                                    label: 'Ogrzewanie',
+                                    value: _productHeating,
+                                    onChanged: (value) =>
+                                        setState(() => _productHeating = value),
+                                  ),
+                                  _SettingsSwitch(
+                                    icon: Icons.air_outlined,
+                                    label: 'Turbiny wiatrowe',
+                                    value: _productWindTurbines,
+                                    onChanged: (value) => setState(
+                                      () => _productWindTurbines = value,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            _SettingsCategoryTile(
+                              icon: Icons.sell_outlined,
+                              title: 'Kontakty',
+                              subtitle: 'Typy kontaktów i statusy',
+                              onTap: () =>
+                                  _pushAccountPage(const ContactStatusesPage()),
+                            ),
+                            _SettingsCategoryTile(
+                              icon: Icons.pending_actions_outlined,
+                              title: 'Historia / nierozliczone spotkania',
+                              subtitle: 'Spotkania wymagające decyzji',
+                              onTap: () => _openSettingsCategory(
+                                title: 'Historia',
+                                icon: Icons.pending_actions_outlined,
+                                children: const [_UnprocessedMeetingsList()],
+                              ),
+                            ),
+                            const _SettingsCategoryTile(
+                              icon: Icons.info_outline,
+                              title: 'Wersja aplikacji: 0.0.1',
+                              subtitle: '0.0.1',
+                              onTap: null,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: _SettingsPanelCloseButton(
+            onClose: () => Navigator.pop(context),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsPanelCloseButton extends StatelessWidget {
+  const _SettingsPanelCloseButton({required this.onClose});
+
+  final VoidCallback onClose;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 8, 12, 0),
+        child: Align(
+          alignment: Alignment.topRight,
+          child: IconButton(
+            tooltip: 'Zamknij',
+            onPressed: onClose,
+            icon: const Icon(Icons.close),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ContactStatusesPage extends StatelessWidget {
+  const ContactStatusesPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: appBackground,
+      appBar: AppBar(
+        centerTitle: false,
+        leading: IconButton(
+          tooltip: 'Wróć',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        title: const Text(
+          'Kontakty',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, thickness: 1, color: appBorder),
+        ),
+      ),
+      body: _PageShell(
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
+          child: ValueListenableBuilder<List<ContactStatus>>(
+            valueListenable: _customContactStatusesNotifier,
+            builder: (context, _, child) {
+              return ListView(
+                padding: const EdgeInsets.only(bottom: 28),
+                children: const [
+                  _StatusStageSection(
+                    stage: 'contact_type',
+                    title: 'Typy kontaktów',
+                  ),
+                  SizedBox(height: 16),
+                  _StatusStageSection(
+                    stage: 'contact',
+                    title: 'Statusy kontaktów',
+                  ),
+                ],
               );
             },
           ),
-          const SizedBox(height: 14),
-          _SettingsCategoryTile(
-            icon: Icons.person_outline,
-            title: 'Konto',
-            subtitle: 'Profil, e-mail, hasło i usunięcie konta',
-            onTap: () => _openSettingsCategory(
-              title: 'Konto',
-              icon: Icons.person_outline,
-              children: [
-                const _SettingsRow(
-                  icon: Icons.badge_outlined,
-                  label: 'Imię i nazwisko',
-                  value: 'Do uzupełnienia',
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusStageSection extends StatefulWidget {
+  const _StatusStageSection({required this.stage, required this.title});
+
+  final String stage;
+  final String title;
+
+  @override
+  State<_StatusStageSection> createState() => _StatusStageSectionState();
+}
+
+class _StatusStageSectionState extends State<_StatusStageSection> {
+  final _inlineController = TextEditingController();
+  final _inlineFocusNode = FocusNode();
+  ContactStatus? _editingStatus;
+  bool _isEditingInline = false;
+  bool _isSavingInline = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _inlineFocusNode.addListener(_handleInlineFocusChange);
+  }
+
+  @override
+  void dispose() {
+    _inlineFocusNode.removeListener(_handleInlineFocusChange);
+    _inlineFocusNode.dispose();
+    _inlineController.dispose();
+    super.dispose();
+  }
+
+  void _handleInlineFocusChange() {
+    if (!_inlineFocusNode.hasFocus && _isEditingInline) {
+      _saveInlineStatus();
+    }
+  }
+
+  Future<void> _deleteStatus(ContactStatus status) async {
+    final statuses = [..._customContactStatusesNotifier.value]
+      ..removeWhere((item) => item.value == status.value);
+    await _saveCustomContactStatuses(statuses);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _changeStatusColor(ContactStatus status) async {
+    final pickedColor = await showModalBottomSheet<Color>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Wybierz kolor',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final color in _statusPalette)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: () => Navigator.of(context).pop(color),
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: color == status.color
+                                ? appTextPrimary
+                                : appBorder,
+                            width: color == status.color ? 2 : 1,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (pickedColor == null || pickedColor == status.color) return;
+
+    final previousStatuses = [..._customContactStatusesNotifier.value];
+    final statuses = [
+      for (final item in previousStatuses)
+        if (item.value == status.value)
+          ContactStatus(
+            item.value,
+            item.label,
+            pickedColor,
+            stage: item.stage,
+            icon: item.icon,
+            isSystem: item.isSystem,
+          )
+        else
+          item,
+    ];
+
+    try {
+      await _saveCustomContactStatuses(statuses);
+      if (mounted) setState(() {});
+    } catch (error) {
+      _customContactStatusesNotifier.value = previousStatuses;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Nie udało się zmienić koloru: $error')),
+        );
+    }
+  }
+
+  void _startInlineEdit([ContactStatus? status]) {
+    setState(() {
+      _editingStatus = status;
+      _isEditingInline = true;
+      _inlineController.text = status?.label ?? '';
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _inlineFocusNode.requestFocus();
+      _inlineController.selection = TextSelection(
+        baseOffset: 0,
+        extentOffset: _inlineController.text.length,
+      );
+    });
+  }
+
+  Future<void> _changeStatusIcon(ContactStatus status) async {
+    final pickedIcon = await showModalBottomSheet<IconData>(
+      context: context,
+      useSafeArea: true,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Wybierz ikonę',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 14),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final icon in _contactStatusIconChoices)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => Navigator.of(context).pop(icon),
+                      child: Container(
+                        width: 42,
+                        height: 42,
+                        decoration: BoxDecoration(
+                          color: status.color.withValues(alpha: 0.10),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: icon == status.icon
+                                ? status.color
+                                : appBorder,
+                            width: icon == status.icon ? 2 : 1,
+                          ),
+                        ),
+                        child: Icon(icon, color: status.color, size: 22),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (pickedIcon == null || pickedIcon == status.icon) return;
+
+    final previousStatuses = [..._customContactStatusesNotifier.value];
+    final statuses = [
+      for (final item in previousStatuses)
+        if (item.value == status.value)
+          ContactStatus(
+            item.value,
+            item.label,
+            item.color,
+            stage: item.stage,
+            icon: pickedIcon,
+            isSystem: item.isSystem,
+          )
+        else
+          item,
+    ];
+
+    try {
+      await _saveCustomContactStatuses(statuses);
+      if (mounted) setState(() {});
+    } catch (error) {
+      _customContactStatusesNotifier.value = previousStatuses;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Nie udało się zmienić ikony: $error')),
+        );
+    }
+  }
+
+  Future<void> _saveInlineStatus() async {
+    if (_isSavingInline) return;
+    final label = _inlineController.text.trim();
+    final editingStatus = _editingStatus;
+
+    if (label.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _isEditingInline = false;
+        _editingStatus = null;
+        _inlineController.clear();
+      });
+      return;
+    }
+
+    setState(() => _isSavingInline = true);
+
+    final nextStatus = ContactStatus(
+      editingStatus?.value ?? 'custom_${DateTime.now().microsecondsSinceEpoch}',
+      label,
+      editingStatus?.color ?? _automaticStatusColor(widget.stage),
+      stage: widget.stage,
+      icon:
+          editingStatus?.icon ??
+          (widget.stage == 'contact' ? Icons.label_outline_rounded : null),
+      isSystem: false,
+    );
+
+    final previousStatuses = [..._customContactStatusesNotifier.value];
+    final statuses = [...previousStatuses];
+    final index = statuses.indexWhere((item) => item.value == nextStatus.value);
+    if (index == -1) {
+      statuses.add(nextStatus);
+    } else {
+      statuses[index] = nextStatus;
+    }
+
+    try {
+      await _saveCustomContactStatuses(statuses);
+      if (!mounted) return;
+      setState(() {
+        _isEditingInline = false;
+        _isSavingInline = false;
+        _editingStatus = null;
+        _inlineController.clear();
+      });
+    } catch (error) {
+      _customContactStatusesNotifier.value = previousStatuses;
+      if (!mounted) return;
+      setState(() => _isSavingInline = false);
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Nie udało się zapisać: $error')),
+        );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final statuses = _statusesForStage(widget.stage);
+    final customStatuses = statuses
+        .where((status) => !status.isSystem)
+        .toList();
+
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onTap: () {
+        if (_inlineFocusNode.hasFocus) {
+          _inlineFocusNode.unfocus();
+        }
+      },
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.title,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: appTextPrimary,
+                  ),
                 ),
-                _SettingsRow(
-                  icon: Icons.alternate_email_outlined,
-                  label: 'Adres e-mail',
-                  value: email.isEmpty ? 'Brak e-maila' : email,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final status in customStatuses)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _isEditingInline && _editingStatus?.value == status.value
+                  ? _InlineStatusEditorTile(
+                      controller: _inlineController,
+                      focusNode: _inlineFocusNode,
+                      isSaving: _isSavingInline,
+                      stage: widget.stage,
+                      onSubmitted: _saveInlineStatus,
+                    )
+                  : Dismissible(
+                      key: ValueKey('status-${status.value}'),
+                      direction: DismissDirection.endToStart,
+                      background: Container(
+                        alignment: Alignment.centerRight,
+                        padding: const EdgeInsets.only(right: 18),
+                        decoration: BoxDecoration(
+                          color: appDanger,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.delete_outline,
+                          color: Colors.white,
+                        ),
+                      ),
+                      onDismissed: (_) => _deleteStatus(status),
+                      child: Material(
+                        color: appSurface,
+                        borderRadius: BorderRadius.circular(8),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: () => _startInlineEdit(status),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 0,
+                            ),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: appBorder),
+                            ),
+                            child: Row(
+                              children: [
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(999),
+                                  onTap: widget.stage == 'contact_type'
+                                      ? () => _changeStatusColor(status)
+                                      : () => _changeStatusIcon(status),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                      horizontal: 2,
+                                    ),
+                                    child: widget.stage == 'contact_type'
+                                        ? Container(
+                                            width: 14,
+                                            height: 14,
+                                            decoration: BoxDecoration(
+                                              color: status.color,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          )
+                                        : Icon(
+                                            status.icon ??
+                                                Icons.label_outline_rounded,
+                                            color: status.color,
+                                            size: 18,
+                                          ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Container(
+                                  width: 1,
+                                  height: 26,
+                                  color: appBorder,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    status.label,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: _isEditingInline && _editingStatus == null
+                ? _InlineStatusEditorTile(
+                    controller: _inlineController,
+                    focusNode: _inlineFocusNode,
+                    isSaving: _isSavingInline,
+                    stage: widget.stage,
+                    onSubmitted: _saveInlineStatus,
+                  )
+                : _InlineStatusAddTile(
+                    label: widget.stage == 'contact_type'
+                        ? 'Dodaj typ'
+                        : 'Dodaj status',
+                    onTap: () => _startInlineEdit(),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineStatusAddTile extends StatelessWidget {
+  const _InlineStatusAddTile({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: appSurfaceSoft,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: appBorder),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.add, size: 18, color: appTextSecondary),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: appTextSecondary,
+                  fontWeight: FontWeight.w800,
                 ),
-                const _SettingsRow(
-                  icon: Icons.phone_outlined,
-                  label: 'Numer telefonu',
-                  value: 'Opcjonalny',
-                ),
-                const _SettingsRow(
-                  icon: Icons.solar_power_outlined,
-                  label: 'Branża sprzedażowa',
-                  value: 'OZE / sprzedaż bezpośrednia',
-                ),
-                _SettingsAction(
-                  icon: Icons.archive_outlined,
-                  label: 'Archiwum kontaktów',
-                  onTap: _openArchivedContacts,
-                ),
-                _SettingsAction(
-                  icon: Icons.pending_actions_outlined,
-                  label: 'Nieprzerobione spotkania',
-                  onTap: _openUnprocessedMeetings,
-                ),
-                _SettingsAction(
-                  icon: Icons.lock_reset_outlined,
-                  label: 'Zmiana hasła',
-                  onTap: () {},
-                ),
-                _SettingsAction(
-                  icon: Icons.logout_outlined,
-                  label: 'Wyloguj',
-                  onTap: () => _supabase.auth.signOut(),
-                ),
-                _SettingsAction(
-                  icon: Icons.delete_forever_outlined,
-                  label: 'Usuń konto',
-                  destructive: true,
-                  onTap: () {},
-                ),
-              ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InlineStatusEditorTile extends StatelessWidget {
+  const _InlineStatusEditorTile({
+    required this.controller,
+    required this.focusNode,
+    required this.isSaving,
+    required this.stage,
+    required this.onSubmitted,
+  });
+
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final bool isSaving;
+  final String stage;
+  final Future<void> Function() onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minHeight: 46),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+      decoration: BoxDecoration(
+        color: appSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: appBorder),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              enabled: !isSaving,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
+                hintText: 'Wpisz nazwę',
+              ),
+              onTapOutside: (_) => focusNode.unfocus(),
+              onSubmitted: (_) => onSubmitted(),
             ),
           ),
-          _SettingsCategoryTile(
-            icon: Icons.notifications_none,
-            title: 'Powiadomienia',
-            subtitle: 'Kanały, przypomnienia i push',
-            onTap: () => _openSettingsCategory(
-              title: 'Powiadomienia',
-              icon: Icons.notifications_none,
-              children: [
-                _SettingsSwitch(
-                  icon: Icons.app_shortcut_outlined,
-                  label: 'Powiadomienia w aplikacji',
-                  value: _inAppNotifications,
-                  onChanged: (value) =>
-                      setState(() => _inAppNotifications = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.notifications_active_outlined,
-                  label: 'Powiadomienia push',
-                  value: _pushNotifications,
-                  onChanged: (value) =>
-                      setState(() => _pushNotifications = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.alternate_email_outlined,
-                  label: 'Powiadomienia e-mail',
-                  value: _emailNotifications,
-                  onChanged: (value) =>
-                      setState(() => _emailNotifications = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.event_available_outlined,
-                  label: 'Przypomnienia o spotkaniach',
-                  value: _meetingReminders,
-                  onChanged: (value) =>
-                      setState(() => _meetingReminders = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.call_outlined,
-                  label: 'Przypomnienia o klientach do telefonu',
-                  value: _phoneReminders,
-                  onChanged: (value) => setState(() => _phoneReminders = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.place_outlined,
-                  label: 'Przypomnienia o klientach do podjechania',
-                  value: _visitReminders,
-                  onChanged: (value) => setState(() => _visitReminders = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.notifications_outlined,
-                  label: 'Powiadomienia push włączone/wyłączone',
-                  value: _pushNotifications,
-                  onChanged: (value) =>
-                      setState(() => _pushNotifications = value),
-                ),
-              ],
+          if (isSaving)
+            const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.directions_walk,
-            title: 'System pracy - leadowanie',
-            subtitle: 'Tydzień pracy, cel i status kontaktu',
-            onTap: () => _openSettingsCategory(
-              title: 'System pracy - leadowanie',
-              icon: Icons.directions_walk,
-              children: [
-                const _SettingsRow(
-                  icon: Icons.first_page_outlined,
-                  label: 'Początek tygodnia pracy',
-                  value: 'Poniedziałek',
-                ),
-                const _SettingsRow(
-                  icon: Icons.last_page_outlined,
-                  label: 'Koniec tygodnia pracy',
-                  value: 'Piątek',
-                ),
-                _SettingsRow(
-                  icon: Icons.flag_outlined,
-                  label: 'Cel leadowania',
-                  value: '$_defaultLeadGoal spotkań',
-                ),
-                _SettingsAction(
-                  icon: Icons.flag_circle_outlined,
-                  label: 'Ustaw cel leadowania',
-                  onTap: _editDefaultLeadGoal,
-                ),
-                const _SettingsRow(
-                  icon: Icons.sync_alt_outlined,
-                  label: 'Cykl pracy',
-                  value: 'Mieszany',
-                ),
-                const _SettingsRow(
-                  icon: Icons.label_outline,
-                  label: 'Domyślny status nowego kontaktu',
-                  value: 'Umówione spotkanie',
-                ),
-                _SettingsAction(
-                  icon: Icons.auto_awesome_outlined,
-                  label: 'Pokaż onboarding',
-                  onTap: _showOnboardingPreview,
-                ),
-              ],
-            ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.handshake_outlined,
-            title: 'Sprzedaż',
-            subtitle: 'Produkty, godziny spotkań i tryb sprzedaży',
-            onTap: () => _openSettingsCategory(
-              title: 'Sprzedaż',
-              icon: Icons.handshake_outlined,
-              children: [
-                const _SettingsRow(
-                  icon: Icons.inventory_2_outlined,
-                  label: 'Aktywne produkty',
-                  value: 'PV + ME, ME, UPSELL...',
-                ),
-                const _SettingsRow(
-                  icon: Icons.timer_outlined,
-                  label: 'Średni czas trwania spotkania sprzedażowego',
-                  value: 'Do ustalenia',
-                ),
-                const _SettingsRow(
-                  icon: Icons.wb_sunny_outlined,
-                  label: 'Początek dnia sprzedażowego',
-                  value: '12:00',
-                ),
-                const _SettingsRow(
-                  icon: Icons.nights_stay_outlined,
-                  label: 'Koniec dnia sprzedażowego',
-                  value: '18:00',
-                ),
-                _SettingsSwitch(
-                  icon: Icons.mic_none_outlined,
-                  label: 'Automatyczne nagrywanie spotkań',
-                  value: _autoRecordMeetings,
-                  onChanged: (value) =>
-                      setState(() => _autoRecordMeetings = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.notifications_paused_outlined,
-                  label: 'Powiadomienia podczas spotkań sprzedażowych',
-                  value: _salesMeetingNotifications,
-                  onChanged: (value) =>
-                      setState(() => _salesMeetingNotifications = value),
-                ),
-                _SettingsAction(
-                  icon: Icons.pending_actions_outlined,
-                  label: 'Nieprzerobione spotkania',
-                  onTap: _openUnprocessedMeetings,
-                ),
-              ],
-            ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.psychology_alt_outlined,
-            title: 'Mechanika 1.2',
-            subtitle: 'Agent AI w tle, statusy i podsumowania',
-            onTap: () => _openSettingsCategory(
-              title: 'Mechanika 1.2',
-              icon: Icons.psychology_alt_outlined,
-              children: [
-                const _SettingsRow(
-                  icon: Icons.auto_awesome_outlined,
-                  label: 'Agent AI',
-                  value: 'Ukryty mechanizm w tle',
-                ),
-                const _SettingsRow(
-                  icon: Icons.insights_outlined,
-                  label: 'Analiza nagrań',
-                  value: 'Konkluzje zapisują się na stałe',
-                ),
-                const _SettingsRow(
-                  icon: Icons.route_outlined,
-                  label: 'Cykl pracy',
-                  value: 'Leadowanie + dzień sprzedażowy',
-                ),
-                const _SettingsRow(
-                  icon: Icons.inventory_2_outlined,
-                  label: 'Produkty',
-                  value: 'Edytowalne w ustawieniach',
-                ),
-                _SettingsAction(
-                  icon: Icons.description_outlined,
-                  label: 'Instrukcja dla agenta AI',
-                  onTap: _showAiInstructionPlaceholder,
-                ),
-              ],
-            ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.dashboard_customize_outlined,
-            title: 'Dashboard',
-            subtitle: 'Widoczność i kolejność sekcji',
-            onTap: () => _openSettingsCategory(
-              title: 'Dashboard',
-              icon: Icons.dashboard_customize_outlined,
-              children: [
-                _SettingsSwitch(
-                  icon: Icons.tune_outlined,
-                  label: 'Personalizacja ekranu głównego',
-                  value: _dashboardPersonalization,
-                  onChanged: (value) =>
-                      setState(() => _dashboardPersonalization = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.visibility_outlined,
-                  label: 'Wybór widocznych sekcji',
-                  value: _dashboardVisibleSections,
-                  onChanged: (value) =>
-                      setState(() => _dashboardVisibleSections = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.reorder_outlined,
-                  label: 'Kolejność sekcji',
-                  value: _dashboardSectionOrder,
-                  onChanged: (value) =>
-                      setState(() => _dashboardSectionOrder = value),
-                ),
-              ],
-            ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.summarize_outlined,
-            title: 'Raporty',
-            subtitle: 'E-mail, raporty tygodniowe i miesięczne',
-            onTap: () => _openSettingsCategory(
-              title: 'Raporty',
-              icon: Icons.summarize_outlined,
-              children: [
-                _SettingsRow(
-                  icon: Icons.alternate_email_outlined,
-                  label: 'Adres e-mail do raportów',
-                  value: email.isEmpty ? 'Do uzupełnienia' : email,
-                ),
-                _SettingsSwitch(
-                  icon: Icons.send_outlined,
-                  label: 'Wysyłka raportów e-mail',
-                  value: _emailReports,
-                  onChanged: (value) => setState(() => _emailReports = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.workspace_premium_outlined,
-                  label: 'Raporty tygodniowe (Premium)',
-                  value: _weeklyReports,
-                  onChanged: (value) => setState(() => _weeklyReports = value),
-                ),
-                _SettingsSwitch(
-                  icon: Icons.workspace_premium_outlined,
-                  label: 'Raporty miesięczne (Premium)',
-                  value: _monthlyReports,
-                  onChanged: (value) => setState(() => _monthlyReports = value),
-                ),
-              ],
-            ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.palette_outlined,
-            title: 'Wygląd aplikacji',
-            subtitle: 'Motyw i kolorystyka',
-            onTap: () => _openSettingsCategory(
-              title: 'Wygląd aplikacji',
-              icon: Icons.palette_outlined,
-              children: const [
-                _SettingsRow(
-                  icon: Icons.light_mode_outlined,
-                  label: 'Motyw jasny',
-                  value: 'Włączony',
-                ),
-                _SettingsRow(
-                  icon: Icons.dark_mode_outlined,
-                  label: 'Motyw ciemny',
-                  value: 'Wyłączony',
-                ),
-                _SettingsRow(
-                  icon: Icons.brightness_auto_outlined,
-                  label: 'Motyw systemowy',
-                  value: 'Wyłączony',
-                ),
-                _SettingsRow(
-                  icon: Icons.format_paint_outlined,
-                  label: 'Wybór kolorystyki',
-                  value: 'Doorka',
-                ),
-              ],
-            ),
-          ),
-          _SettingsCategoryTile(
-            icon: Icons.help_outline,
-            title: 'Pomoc i informacje',
-            subtitle: 'FAQ, kontakt, regulamin i wersja aplikacji',
-            onTap: () => _openSettingsCategory(
-              title: 'Pomoc i informacje',
-              icon: Icons.help_outline,
-              children: const [
-                _SettingsRow(
-                  icon: Icons.quiz_outlined,
-                  label: 'FAQ',
-                  value: 'Otwórz',
-                ),
-                _SettingsRow(
-                  icon: Icons.support_agent_outlined,
-                  label: 'Centrum pomocy',
-                  value: 'Otwórz',
-                ),
-                _SettingsRow(
-                  icon: Icons.mail_outline,
-                  label: 'Kontakt',
-                  value: 'Otwórz',
-                ),
-                _SettingsRow(
-                  icon: Icons.bug_report_outlined,
-                  label: 'Zgłoś problem',
-                  value: 'Otwórz',
-                ),
-                _SettingsRow(
-                  icon: Icons.privacy_tip_outlined,
-                  label: 'Polityka prywatności',
-                  value: 'Otwórz',
-                ),
-                _SettingsRow(
-                  icon: Icons.gavel_outlined,
-                  label: 'Regulamin',
-                  value: 'Otwórz',
-                ),
-                _SettingsRow(
-                  icon: Icons.info_outline,
-                  label: 'Wersja aplikacji',
-                  value: '0.1.0',
-                ),
-              ],
-            ),
-          ),
         ],
       ),
     );
@@ -6061,6 +8693,7 @@ class _AccountHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Colors.black,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -6070,7 +8703,7 @@ class _AccountHeader extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: appTextSecondary,
+                    color: Colors.black,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -6094,7 +8727,7 @@ class _SettingsCategoryTile extends StatelessWidget {
   final IconData icon;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -6114,47 +8747,22 @@ class _SettingsCategoryTile extends StatelessWidget {
             ),
             child: Row(
               children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(
-                    color: appBrandSoft,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, color: appBrand, size: 22),
-                ),
-                const SizedBox(width: 12),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: appTextPrimary,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        subtitle,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: appTextSecondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          height: 1.15,
-                        ),
-                      ),
-                    ],
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: appTextPrimary,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                const Icon(Icons.chevron_right, color: appTextSecondary),
+                if (onTap != null) ...[
+                  const SizedBox(width: 10),
+                  const Icon(Icons.chevron_right, color: appTextSecondary),
+                ],
               ],
             ),
           ),
@@ -6620,47 +9228,20 @@ class _UnprocessedMeetingsListState extends State<_UnprocessedMeetingsList> {
   }
 
   Future<List<Contact>> _fetchMeetings() async {
-    final data = await _supabase
-        .from('contacts')
-        .select()
-        .isFilter('archived_at', null)
-        .isFilter('moved_to_client_at', null);
-
-    final today = DateTime.now();
-    final todayOnly = DateTime(today.year, today.month, today.day);
-
-    return (data as List)
-        .map((item) => Contact.fromMap(Map<String, dynamic>.from(item)))
-        .where((contact) {
-          if (contact.status == 'meeting_active' ||
-              contact.status == 'postponed') {
-            return true;
-          }
-
-          if (contact.status != 'scheduled_meeting' ||
-              contact.contactDate == null) {
-            return false;
-          }
-
-          final meetingDay = DateTime(
-            contact.contactDate!.year,
-            contact.contactDate!.month,
-            contact.contactDate!.day,
-          );
-          return meetingDay.isBefore(todayOnly);
-        })
-        .toList()
-      ..sort((a, b) {
-        final aDate = a.contactDate ?? DateTime(1900);
-        final bDate = b.contactDate ?? DateTime(1900);
-        final dateCompare = bDate.compareTo(aDate);
-        if (dateCompare != 0) return dateCompare;
-        return b.contactTime.compareTo(a.contactTime);
-      });
+    final contacts = await _fetchActiveContacts();
+    return contacts.where(_isUnprocessedMeeting).toList()
+      ..sort((a, b) => _compareContactsByDateAndTime(a, b, newestFirst: true));
   }
 
-  void _reload() {
-    setState(() => _meetingsFuture = _fetchMeetings());
+  Future<void> _reload() async {
+    try {
+      final meetings = await _fetchMeetings().timeout(_manualRefreshTimeout);
+      if (!mounted) return;
+      setState(() => _meetingsFuture = Future.value(meetings));
+    } catch (error) {
+      if (!mounted) return;
+      _ignoreManualRefreshError(error);
+    }
   }
 
   @override
@@ -6714,6 +9295,508 @@ class _UnprocessedMeetingsListState extends State<_UnprocessedMeetingsList> {
       },
     );
   }
+}
+
+class _UnprocessedMeetingsPopup extends StatefulWidget {
+  const _UnprocessedMeetingsPopup();
+
+  @override
+  State<_UnprocessedMeetingsPopup> createState() =>
+      _UnprocessedMeetingsPopupState();
+}
+
+class _UnprocessedMeetingsPopupState extends State<_UnprocessedMeetingsPopup> {
+  late Future<List<Contact>> _meetingsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _meetingsFuture = _fetchMeetings();
+  }
+
+  Future<List<Contact>> _fetchMeetings() async {
+    final contacts = await _fetchActiveContacts();
+    return contacts.where(_isUnprocessedMeeting).toList()
+      ..sort((a, b) => _compareContactsByDateAndTime(a, b, newestFirst: true));
+  }
+
+  Future<void> _reload() async {
+    final meetings = await _fetchMeetings();
+    if (!mounted) return;
+    setState(() => _meetingsFuture = Future.value(meetings));
+    _unprocessedMeetingsNotifier.value = meetings.length;
+  }
+
+  Future<void> _postponeAllNextWeek(List<Contact> meetings) async {
+    final nextWeek = DateTime.now().add(const Duration(days: 7));
+    for (final meeting in meetings) {
+      await _postponeUnprocessedMeeting(context, meeting, nextWeek);
+    }
+    await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(
+        maxWidth: 390,
+        maxHeight: MediaQuery.sizeOf(context).height - 100,
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: appBackground,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: appBorderStrong),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.16),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: FutureBuilder<List<Contact>>(
+          future: _meetingsFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Padding(
+                padding: EdgeInsets.all(22),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            final meetings = snapshot.data ?? [];
+            if (meetings.isEmpty) {
+              return Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Powiadomienia',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Zamknij',
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Nie masz nierozliczonych spotkań.',
+                      style: TextStyle(color: appTextSecondary),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Nierozliczone spotkania (${meetings.length})',
+                          style: const TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Zamknij',
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => _postponeAllNextWeek(meetings),
+                    icon: const Icon(Icons.update_outlined),
+                    label: const Text('Przenieś wszystkie na przyszły tydzień'),
+                  ),
+                  const SizedBox(height: 10),
+                  Flexible(
+                    child: SingleChildScrollView(
+                      child: Column(
+                        children: [
+                          for (var index = 0; index < meetings.length; index++)
+                            Padding(
+                              padding: EdgeInsets.only(
+                                bottom: index == meetings.length - 1 ? 0 : 8,
+                              ),
+                              child: _UnprocessedMeetingDecisionTile(
+                                contact: meetings[index],
+                                onChanged: _reload,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _UnprocessedMeetingDecisionTile extends StatelessWidget {
+  const _UnprocessedMeetingDecisionTile({
+    required this.contact,
+    required this.onChanged,
+  });
+
+  final Contact contact;
+  final Future<void> Function() onChanged;
+
+  String get _timeText {
+    if (contact.contactTime.length >= 5) {
+      return contact.contactTime.substring(0, 5);
+    }
+    return contact.contactTime.isEmpty ? '--:--' : contact.contactTime;
+  }
+
+  String get _dateText {
+    if (contact.contactDate == null) return 'Bez daty';
+    return '${_shortDate(contact.contactDate!)} | ${_weekdayNameFull(contact.contactDate!)}';
+  }
+
+  Future<void> _run(Future<void> Function() action) async {
+    await action();
+    await onChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: appSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: appBorderStrong),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: appBrandSoft,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _timeText,
+                  style: const TextStyle(
+                    color: appBrand,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  contact.contactName.isEmpty
+                      ? 'Bez nazwy'
+                      : contact.contactName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _dateText,
+            style: const TextStyle(
+              color: appTextSecondary,
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _DecisionChip(
+                label: 'Sprzedane',
+                color: appSuccess,
+                onTap: () =>
+                    _run(() => _sellUnprocessedMeeting(context, contact)),
+              ),
+              _DecisionChip(
+                label: 'Nie sprzedane',
+                color: const Color(0xFFF0A202),
+                onTap: () => _run(() async {
+                  await showContactDetailsSheet(context, contact);
+                }),
+              ),
+              _DecisionChip(
+                label: 'Przełóż',
+                color: appInfo,
+                onTap: () => _run(
+                  () => _postponeUnprocessedMeetingWithPicker(context, contact),
+                ),
+              ),
+              _DecisionChip(
+                label: 'Do kontaktu',
+                color: appBrand,
+                onTap: () => _run(
+                  () => _returnUnprocessedMeetingToContact(context, contact),
+                ),
+              ),
+              _DecisionChip(
+                label: 'Usuń',
+                color: appDanger,
+                onTap: () =>
+                    _run(() => _deleteUnprocessedMeeting(context, contact)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DecisionChip extends StatelessWidget {
+  const _DecisionChip({
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: color.withValues(alpha: 0.10),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: BorderSide(color: color, width: 1),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Future<void> _sellUnprocessedMeeting(
+  BuildContext context,
+  Contact contact,
+) async {
+  final user = _supabase.auth.currentUser;
+  if (user == null) return;
+
+  await _supabase.from('clients').insert({
+    'agent_id': user.id,
+    'source_contact_id': contact.id,
+    'client_name': contact.contactName,
+    'phone': contact.phone,
+    'correspondence_address': contact.address,
+    'installation_address': contact.address,
+    'product_name': '',
+    'contract_signed_at': _dateOnly(DateTime.now()),
+    'execution_method': 'finansowanie',
+    'status': 'signed_contract',
+  });
+
+  await _supabase
+      .from('contacts')
+      .update({
+        'status': 'signed_contract',
+        'moved_to_client_at': DateTime.now().toIso8601String(),
+        'note': _mergeContactNote(
+          contact.note,
+          'Wynik spotkania: spisana umowa. Przeniesiono do W realizacji.',
+        ),
+      })
+      .eq('id', contact.id);
+
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(content: Text('Przeniesiono do W realizacji.')),
+    );
+}
+
+Future<void> _postponeUnprocessedMeetingWithPicker(
+  BuildContext context,
+  Contact contact,
+) async {
+  final selected = await showDialog<DateTime>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Na kiedy przełożyć?'),
+      children: [
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(
+            context,
+            DateTime.now().add(const Duration(days: 1)),
+          ),
+          child: const Text('Jutro'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => Navigator.pop(
+            context,
+            DateTime.now().add(const Duration(days: 7)),
+          ),
+          child: const Text('Za tydzień'),
+        ),
+        SimpleDialogOption(
+          onPressed: () async {
+            final picked = await showDatePicker(
+              context: context,
+              initialDate: DateTime.now().add(const Duration(days: 1)),
+              firstDate: DateTime.now(),
+              lastDate: DateTime.now().add(const Duration(days: 365)),
+            );
+            if (context.mounted) Navigator.pop(context, picked);
+          },
+          child: const Text('Własna data'),
+        ),
+      ],
+    ),
+  );
+
+  if (selected == null) return;
+  if (!context.mounted) return;
+  await _postponeUnprocessedMeeting(context, contact, selected);
+}
+
+Future<void> _postponeUnprocessedMeeting(
+  BuildContext context,
+  Contact contact,
+  DateTime date,
+) async {
+  await _supabase
+      .from('contacts')
+      .update({
+        'status': 'scheduled_meeting',
+        'contact_date': _dateOnly(date),
+        'contact_time': contact.contactTime.isEmpty
+            ? '18:00:00'
+            : contact.contactTime,
+        'meeting_time': contact.contactTime.isEmpty
+            ? '18:00:00'
+            : contact.contactTime,
+        'contact_notification': null,
+        'note': _mergeContactNote(
+          contact.note,
+          'Przełożone na ${_shortDate(date)} (${_weekdayName(date)}).',
+        ),
+      })
+      .eq('id', contact.id);
+}
+
+Future<void> _returnUnprocessedMeetingToContact(
+  BuildContext context,
+  Contact contact,
+) async {
+  final statuses = _statusesForStage('contact');
+  final selected = await showDialog<String>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Jaki status kontaktu?'),
+      children: [
+        for (final status in statuses)
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, status.value),
+            child: Text(status.label),
+          ),
+      ],
+    ),
+  );
+  if (selected == null) return;
+
+  await _supabase
+      .from('contacts')
+      .update({
+        'status': 'contact',
+        'contact_status': selected,
+        'contact_date': null,
+        'contact_time': null,
+        'meeting_time': null,
+        'contact_notification': null,
+        'note': _mergeContactNote(
+          contact.note,
+          'Nierozliczone spotkanie przeniesione do kontaktów.',
+        ),
+      })
+      .eq('id', contact.id);
+}
+
+Future<void> _deleteUnprocessedMeeting(
+  BuildContext context,
+  Contact contact,
+) async {
+  final confirmed = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Usunąć spotkanie?'),
+      content: const Text('Ten kontakt zostanie usunięty na stałe.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Anuluj'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: appDanger),
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Usuń'),
+        ),
+      ],
+    ),
+  );
+
+  if (confirmed != true) return;
+  await _supabase.from('contacts').delete().eq('id', contact.id);
+}
+
+String _mergeContactNote(String currentNote, String addition) {
+  final trimmed = currentNote.trim();
+  if (trimmed.isEmpty) return addition;
+  return '$trimmed\n$addition';
 }
 
 class _SettingsInfoCard extends StatelessWidget {
@@ -7114,6 +10197,8 @@ class _AddContactSheetState extends State<AddContactSheet> {
   final _addressController = TextEditingController();
   final _noteController = TextEditingController();
   late String _status;
+  String? _contactWorkStatus;
+  final List<String> _contactTypes = [];
   DateTime _contactDate = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _contactTime = const TimeOfDay(hour: 18, minute: 0);
   String? _contactQuality;
@@ -7122,7 +10207,13 @@ class _AddContactSheetState extends State<AddContactSheet> {
   @override
   void initState() {
     super.initState();
-    _status = widget.initialStatus;
+    final initialStage = _stageForContactStatus(widget.initialStatus);
+    final stageStatuses = _statusesForStage(initialStage);
+    _status = initialStage == 'contact'
+        ? 'contact'
+        : stageStatuses.any((status) => status.value == widget.initialStatus)
+        ? widget.initialStatus
+        : stageStatuses.first.value;
   }
 
   @override
@@ -7153,11 +10244,16 @@ class _AddContactSheetState extends State<AddContactSheet> {
         'contact_name': _nameController.text.trim(),
         'phone': phone,
         'address': _addressController.text.trim(),
-        'status': _status,
+        'status': _stageForContactStatus(_status) == 'contact'
+            ? 'contact'
+            : _status,
+        'contact_status': _stageForContactStatus(_status) == 'contact'
+            ? _contactWorkStatus
+            : null,
         'note': _noteController.text.trim(),
       };
 
-      if (_status == 'scheduled_meeting') {
+      if (_stageForContactStatus(_status) == 'meeting') {
         payload.addAll({
           'contact_date': _dateOnly(_contactDate),
           'contact_time': _timeOnly(_contactTime),
@@ -7166,7 +10262,11 @@ class _AddContactSheetState extends State<AddContactSheet> {
         });
       }
 
-      await _supabase.from('contacts').insert(payload);
+      if (_contactTypes.isNotEmpty) {
+        payload['contact_type'] = _contactTypeValuesToRaw(_contactTypes);
+      }
+
+      await _insertContactPayload(payload);
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -7182,13 +10282,33 @@ class _AddContactSheetState extends State<AddContactSheet> {
     }
   }
 
+  Future<void> _insertContactPayload(Map<String, dynamic> payload) async {
+    try {
+      await _supabase.from('contacts').insert(payload);
+    } on PostgrestException catch (error) {
+      final canRetryWithoutContactType =
+          payload.containsKey('contact_type') &&
+          _isMissingContactTypeColumnError(error);
+      if (!canRetryWithoutContactType) rethrow;
+
+      final fallbackPayload = Map<String, dynamic>.from(payload)
+        ..remove('contact_type');
+      await _supabase.from('contacts').insert(fallbackPayload);
+    }
+  }
+
+  bool _isMissingContactTypeColumnError(PostgrestException error) {
+    final message = error.message.toLowerCase();
+    return message.contains('contact_type') &&
+        (message.contains('column') || message.contains('schema cache'));
+  }
+
   Future<bool> _contactPhoneExists(String agentId, String phone) async {
     final normalizedPhone = _normalizePhone(phone);
     final data = await _supabase
         .from('contacts')
         .select('id, phone')
         .eq('agent_id', agentId)
-        .isFilter('archived_at', null)
         .isFilter('moved_to_client_at', null);
 
     return (data as List).any((item) {
@@ -7227,27 +10347,48 @@ class _AddContactSheetState extends State<AddContactSheet> {
   }
 
   String get _formTitle {
-    return switch (_status) {
-      'scheduled_meeting' => 'Umów spotkanie',
-      'contact' => 'Dodaj kontakt',
-      'postponed' => 'Przełożone',
-      _ => 'Dodaj kontakt',
-    };
+    return _stageForContactStatus(_status) == 'meeting'
+        ? 'Umów spotkanie'
+        : 'Dodaj kontakt';
   }
 
-  String get _formHint {
-    return switch (_status) {
-      'scheduled_meeting' => 'Minimum: dane kontaktu, adres i dzień.',
-      'contact' => 'Zapisz dane kontaktu, do którego chcesz wrócić.',
-      _ => 'Dodaj dane kontaktu.',
-    };
+  String get _statusStage => _stageForContactStatus(_status);
+
+  Future<void> _pickContactType() async {
+    final picked = await _showContactTypePicker(
+      context,
+      value: _contactTypes.isEmpty ? '' : _contactTypes.first,
+    );
+    if (picked == null) return;
+    setState(() {
+      _contactTypes
+        ..clear()
+        ..add(picked.value);
+    });
   }
 
-  bool get _showStatusPicker => false;
+  void _toggleContactType(ContactStatus type) {
+    setState(() {
+      if (_contactTypes.contains(type.value)) {
+        _contactTypes.remove(type.value);
+        return;
+      }
+      if (_contactTypes.length >= 3) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('Możesz wybrać maksymalnie 3 typy.')),
+          );
+        return;
+      }
+      _contactTypes.add(type.value);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.viewInsetsOf(context).bottom;
+    final isMeetingForm = _statusStage == 'meeting';
 
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 20, 20, bottom + 20),
@@ -7267,21 +10408,28 @@ class _AddContactSheetState extends State<AddContactSheet> {
                           ?.copyWith(fontWeight: FontWeight.w900),
                     ),
                   ),
-                  _ContactStatusPill(status: _statusByValue(_status)),
+                  _ContactStatusPill(
+                    status:
+                        _contactTypes.isNotEmpty &&
+                            _statusesForStage(
+                              'contact_type',
+                            ).any((type) => type.value == _contactTypes.first)
+                        ? _statusByValue(_contactTypes.first)
+                        : _defaultContactTypeStatus,
+                    onTap: _pickContactType,
+                  ),
+                  IconButton(
+                    tooltip: 'Zamknij',
+                    onPressed: () => Navigator.of(context).pop(false),
+                    icon: const Icon(Icons.close),
+                  ),
                 ],
               ),
-              const SizedBox(height: 6),
-              Text(
-                _formHint,
-                style: const TextStyle(
-                  color: appTextSecondary,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 18),
+
+              const SizedBox(height: 10),
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Dane kontaktu'),
+                decoration: const InputDecoration(labelText: 'Imię i nazwisko'),
                 validator: (value) {
                   if (_status == 'scheduled_meeting' &&
                       (value ?? '').trim().isEmpty) {
@@ -7301,25 +10449,23 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 controller: _addressController,
                 decoration: const InputDecoration(labelText: 'Adres'),
               ),
-              if (_showStatusPicker) ...[
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  initialValue: _status,
-                  decoration: const InputDecoration(labelText: 'Status'),
-                  items: [
-                    for (final status in _contactStatuses)
-                      DropdownMenuItem(
-                        value: status.value,
-                        child: Text(status.label),
-                      ),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _status = value);
-                  },
+              const SizedBox(height: 12),
+              _ContactTypeSelector(
+                selectedValues: _contactTypes,
+                onToggle: _toggleContactType,
+                onOpenSettings: () =>
+                    _pushSettingsSubpage(context, const ContactStatusesPage()),
+              ),
+              const SizedBox(height: 12),
+              if (!isMeetingForm) ...[
+                _StatusPickerField(
+                  stage: 'contact',
+                  value: _contactWorkStatus,
+                  onChanged: (value) =>
+                      setState(() => _contactWorkStatus = value),
                 ),
               ],
-              if (_status == 'scheduled_meeting') ...[
+              if (isMeetingForm) ...[
                 const SizedBox(height: 12),
                 _MeetingFields(
                   date: _contactDate,
@@ -7343,10 +10489,10 @@ class _AddContactSheetState extends State<AddContactSheet> {
                   final address = _addressController.text.trim();
                   final note = (value ?? '').trim();
                   final name = _nameController.text.trim();
-                  if (_status == 'scheduled_meeting' && address.isEmpty) {
+                  if (_statusStage == 'meeting' && address.isEmpty) {
                     return 'Umówione spotkanie musi mieć adres.';
                   }
-                  if (_status == 'contact' &&
+                  if (_statusStage == 'contact' &&
                       name.isEmpty &&
                       phone.isEmpty &&
                       address.isEmpty &&
@@ -7361,10 +10507,10 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 onPressed: _isSaving ? null : _save,
                 child: Text(
                   _isSaving
-                      ? (_status == 'scheduled_meeting'
+                      ? (_statusStage == 'meeting'
                             ? 'Umawiam...'
                             : 'Zapisuję...')
-                      : (_status == 'scheduled_meeting'
+                      : (_statusStage == 'meeting'
                             ? 'Umów spotkanie'
                             : 'Dodaj kontakt'),
                 ),
@@ -7422,7 +10568,7 @@ class _MeetingFields extends StatelessWidget {
           initialValue: quality,
           decoration: const InputDecoration(labelText: 'Jakość'),
           items: [
-            const DropdownMenuItem(value: null, child: Text('Brak')),
+            const DropdownMenuItem(value: null, child: Text('?')),
             for (final item in _qualities)
               DropdownMenuItem(value: item, child: Text(item)),
           ],

@@ -27,9 +27,6 @@ Czy w aplikacji ma być link do regulaminu i polityki prywatności w Moje konto?
 ### Dokumenty i storage
 Czy limit 2 MB zostaje technicznie wykonalny po kompresji zdjęć?
 
-### Powiadomienia i przypomnienia
-Czy przypomnienia mają być push, lokalne na telefonie, czy oba typy?
-
 ### Zakres lokalizacji
 Czy lokalizacja wraca dopiero przy funkcjach mapa/teren?
 
@@ -53,7 +50,6 @@ Czy po przeniesieniu do Moi Klienci ma pojawić się opcja Przejdź do klienta?
 ### Cofanie akcji
 Które akcje powinny mieć opcję Cofnij?
 Czy cofnięcie zmiany statusu ma usuwać wpis aktywności, czy dodać nowy wpis cofnięcia?
-Czy archiwizację można cofnąć od razu po wykonaniu?
 
 ### Uprawnienia przyszłych ról
 Jakie dokładnie dane moderator może widzieć?
@@ -73,7 +69,6 @@ Czy przy screenach/podglądzie aplikacji dane mają być maskowane?
 ### Wyszukiwanie
 Po czym agent najczęściej będzie szukał kontaktu: imię, telefon, adres, status, notatka?
 Czy wyszukiwarka ma działać globalnie po Kontaktach i Moi Klienci?
-Czy wyszukiwanie ma obejmować archiwum?
 
 ### Filtry kontaktów
 Jakie filtry są najważniejsze na liście kontaktów?
@@ -151,10 +146,6 @@ Czy aplikacja ma przypominać o kolejnych etapach płatności?
 ### Dokumenty i limity
 Czy pliki mają być prywatne per agent i klient?
 
-### Archiwum klientów
-Jakie akcje przenoszą klienta do archiwum klientów?
-Czy klient z archiwum może wrócić do aktywnych klientów?
-
 ### Trwałe usuwanie
 Czy po 30 dniach karencji usunięcie konta usuwa wszystkie kontakty, klientów, dokumenty i statystyki?
 
@@ -215,20 +206,17 @@ Przed zmianami w produkcyjnej bazie przygotowujemy backup albo eksport w folderz
 
 ### Rejestracja
 Agent rejestruje się przez e-mail i hasło.
-Docelowo aplikacja powinna umożliwiać rejestrację i logowanie przez Google Authentication.
-Przy rejestracji agent musi zaakceptować regulamin oraz politykę prywatności.
-Po rejestracji przez e-mail agent musi potwierdzić adres e-mail przed wejściem do aplikacji.
-Przy rejestracji przez Google Authentication nie wymagamy dodatkowego potwierdzenia e-mail.
+Na teraz do rejestracji konta wymagane są tylko e-mail i hasło.
+Nie wymagamy imienia, nazwiska, telefonu ani innych danych profilu na etapie rejestracji.
+Po rejestracji agent musi potwierdzić adres e-mail przed wejściem do aplikacji.
 Agent pozostaje zalogowany, dopóki sam się nie wyloguje.
 Na ekranie logowania ma być opcja Nie pamiętasz hasła?.
 Reset hasła dotyczy kont zakładanych przez e-mail i hasło. Agent wpisuje swój e-mail, a system wysyła wiadomość z resetem hasła.
-Reset hasła nie dotyczy użytkowników logujących się przez Google.
 
 ### Kontakty i Moi Klienci
 Kontakty i Moi Klienci są osobnymi sekcjami i osobnymi tabelami.
 Docelowa techniczna nazwa tabeli klientów to `clients`.
 Część danych wspólnych, na przykład adres albo numer telefonu, ma synchronizować się między nimi.
-Kontakt z archiwum można przywrócić do aktywnych kontaktów.
 Istniejąca tabela `crm_leads` będzie traktowana jako stara tabela do migracji albo zastąpienia.
 Po zmianie modelu trzeba podmienić odwołania Supabase w projekcie `/Users/kacstelmach/crm` na aktualne nazwy tabel.
 Na etap 1 w schemacie `public` zostają tylko `profiles`, `contacts` i `clients`.
@@ -238,7 +226,7 @@ Lista kontaktów ma być grupowana po statusach, bo statusy są core kontaktu.
 
 ### Pola kontaktu
 Pola kontaktu widoczne dla użytkownika to `contact_name`, `phone`, `address`, `status` oraz `note`.
-Pozostałe pola kontaktu są techniczne i służą aplikacji, bazie danych, RLS, sortowaniu, filtrowaniu, archiwizacji albo automatycznym wyliczeniom.
+Pozostałe pola kontaktu są techniczne i służą aplikacji, bazie danych, RLS, sortowaniu, filtrowaniu albo automatycznym wyliczeniom.
 Kontakt można zapisać bez numeru telefonu albo bez adresu, ale wtedy w polu uwagi / notatki musi być informacja pozwalająca rozpoznać klienta.
 Aplikacja może wykrywać potencjalne duplikaty po numerze telefonu.
 
@@ -276,11 +264,10 @@ Aktywność statusów nie ma pola notatki.
 Domyślnym statusem realizacji klienta po dodaniu do Moi Klienci jest Spisana umowa.
 Status "Do realizacji" nie jest obecnie domyślnym statusem realizacji klienta.
 Status "Spad" jest finalną nazwą statusu przeznaczonego dla Moi Klienci.
-Po ustawieniu statusu Spad aplikacja powinna pokazać przycisk Przenieś do archiwum.
 Domyślne statusy realizacji to: Spisana umowa, Zatwierdzone finansowanie, Wpłacona część płatności, W trakcie montażu, Zamontowany, Zgłoszony do ZE, Zgłoszona dotacje, Spad.
 Statusy realizacji klientów są edytowalne przez agenta.
 Zmiana statusu realizacji ma zmieniać kolor nagłówka klienta albo całej sekcji danych klienta.
-Klient ze statusem Spad zostaje w głównej liście Moi Klienci, dopóki agent nie kliknie Przenieś do archiwum.
+Klient ze statusem Spad zostaje obsługiwany w ramach W realizacji albo przyszłego przepływu zamykania spraw.
 
 ### Moderator i manager
 W przyszłości mogą pojawić się konta typu moderator i manager.
@@ -342,7 +329,6 @@ Z perspektywy aplikacji konto znika od razu po usunięciu.
 Technicznie konto ma 30 dni karencji w bazie danych, ale agent nie powinien widzieć tej informacji w aplikacji.
 
 ### Trwałe usuwanie
-Trwałe usuwanie kontaktu lub klienta jest możliwe tylko z archiwum.
 Przy trwałym usuwaniu aplikacja pokazuje popup potwierdzający. Nie wymagamy wpisywania słowa USUŃ.
 
 ### Przypomnienia

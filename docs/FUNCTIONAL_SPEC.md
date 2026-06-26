@@ -26,11 +26,6 @@ Projektuj aplikację jako jedną całość funkcjonalną, bez blokowania element
 ## Ustawienia oraz preferencje użytkownika
 Szczegółowa organizacja ustawień znajduje się w `docs/sections/Settings.md`.
 
-## Powiadomienia
-Aplikacja ma informować o:
-wykonywanych telefonach,
-kontaktach bez zmiany statusu od 3 dni,
-terminie kontaktu z danym klientem,
 ## Offline i Online
 Głównym źródłem danych aplikacji jest Supabase.com.
 W Supabase trzymane są dane klientów, kontaktów, statusów, raportów i statystyk przypisanych do poszczególnych agentów.

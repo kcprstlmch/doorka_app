@@ -37,9 +37,6 @@ Dokładny proces zostaje do dopracowania.
 Funkcja Zamknij dzień pojawia się wtedy, gdy agent zrealizuje cel danego spotkania/sesji leadowania.
 Szczegóły ekranu podsumowania zostają do dopracowania.
 
-## Powiadomienia
-Zdarzenia generujące powiadomienia wymagają późniejszego doprecyzowania.
-
 ## Offline
 Na teraz zakładamy, że internet jest dostępny.
 Tryb offline i synchronizacja zostają do późniejszego projektu.

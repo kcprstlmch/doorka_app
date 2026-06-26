@@ -10,20 +10,21 @@ Są to aktualne assety robocze marki Doorka.
 Finalny UX/UI nadal będzie omawiany później na podstawie inspiracji, między innymi z Pinteresta.
 
 ## 1. Top bar
-Po lewej logo Doorka, po prawej ikona dzwoneczka wraz z kropeczką czerwoną po jej prawej stronie przedstawiająca powiadomienia, które po kliknięciu wyświetlają listę z najważniejszymi informacjami dot. kontaktów, klientów itp, itd.
+Po lewej logo Doorka, po prawej avatar albo inicjały handlowca.
+Po kliknięciu avatara/inicjałów ekran Konto/Ustawienia wysuwa się z prawej strony.
+Panel Konto/Ustawienia jest pełnoekranowy: przykrywa topbar, dolny pasek i całą treść aplikacji.
 Na dole top baru ma być delikatna pozioma linia oddzielająca menu od treści aktualnego ekranu.
-
-W przyszłości zostanie dodany jeszcze przycisk menu (na prawo od ikony dzwoneczka), po jego kliknięciu wyświetli się lista wszystkich najważniejszych sekcji. Element dodania w przyszłości
 
 ## 2. Panel dolny
 Na nim są widoczne ikony danych sekcji, od lewej:
 Dashboard (z ikoną domu),
 Kontakty (z ikoną kilku główek obok siebie),
-Statystyka (z ikoną statystyki),
-Konto (z inicjałami pierwszej litery imienia i pierwszej litery nazwiska)
+Umówione spotkania,
+W realizacji,
+Statystyka (z ikoną statystyki)
 
-Zakładka Konto w dolnym panelu nie używa standardowej ikony użytkownika.
-Zamiast ikony pokazuje inicjały agenta w delikatnym okręgu, analogicznie do inicjałów na kafelkach kontaktów.
+Konto nie jest już osobną zakładką w dolnym panelu.
+Konto / Ustawienia otwierają się po kliknięciu avatara albo inicjałów agenta w topbarze.
 
 Element "Start" w dolnym panelu zostaje zastąpiony nazwą "Dashboard".
 Odstępy między ikonami w dolnym panelu mają być mniejsze.
@@ -42,17 +43,20 @@ W przyszłości dodane zostaną również takie funkcje jak: dodaj teren, włą
 Funkcje terenu/mapy oraz nagrywania są funkcjami przyszłościowymi i nie wchodzą w aktualny podstawowy zakres aplikacji.
 
 ## Sekcje / moduły
-Aplikacja dzieli się na 4 sekcje
+Aplikacja dzieli się na 5 głównych sekcji widocznych w dolnym panelu.
 
 Główne sekcje to:
 Strona główna (dashboard),
 Kontakty, lista kontaktów, panel do zarządzania nimi,
+Umówione spotkania,
 W realizacji, kolejka aktywnych spraw z tabeli `clients`,
 Statystyka, automatyczne dane pobierane dot. umówionych spotkań / spisanych umów / spraw dodanych do W realizacji / spadów
-Ustawienia / preferencje konta
+
+Ustawienia / preferencje konta nie są sekcją dolnego panelu.
+Są pełnoekranowym panelem otwieranym z topbara.
 
 Ekrany głównych sekcji nie mają osobnego górnego nagłówka z nazwą sekcji.
-Po wejściu w Dashboard, Kontakty, Statystykę, W realizacji albo Konto nie pokazujemy dodatkowego wiersza/kafelka z tytułem ekranu.
+Po wejściu w Dashboard, Kontakty, Umówione spotkania, Statystykę albo W realizacji nie pokazujemy dodatkowego wiersza/kafelka z tytułem ekranu.
 Treść sekcji zaczyna się od razu od właściwego modułu albo listy.
 
 ## W realizacji
@@ -76,23 +80,22 @@ Etapy realizacji:
 Etap 2 zależy od typu klienta: dla klienta na raty jest to Finansowanie, a dla klienta gotówkowego Wpłacona zaliczka.
 W szczegółach sprawy W realizacji agent ma widzieć historię zmian etapów/statusów z dokładną datą i godziną zmiany.
 
-## Konto, ustawienia i onboarding
-Szczegółowa organizacja ekranu Konto, ustawień, preferencji użytkownika oraz podglądu onboardingu znajduje się w `docs/sections/Settings.md`.
+## Konto i ustawienia
+Szczegółowa organizacja ekranu Konto, ustawień i preferencji użytkownika znajduje się w `docs/sections/Settings.md`.
 
 Ekran Konto pełni rolę centrum ustawień użytkownika.
 Na górze ekranu widoczny jest profil agenta z inicjałami w delikatnym tle, nazwą użytkownika i adresem e-mail.
 Kliknięcie inicjałów/awatara agenta otwiera opcję ustawienia zdjęcia profilowego.
 Na inicjałach w ustawieniach ma być widoczna przyciemniona albo lekko zblurowana nakładka z ikoną aparatu, podobnie jak w popularnych kontach typu Google.
-Po wybraniu zdjęcia profilowego avatar zastępuje inicjały w ustawieniach oraz w dolnym panelu na zakładce Konto.
+Po wybraniu zdjęcia profilowego avatar zastępuje inicjały w ustawieniach oraz w topbarze.
 
 Ekran główny ustawień wizualnie powinien być prostą listą kategorii.
 Każda kategoria jest osobnym kafelkiem albo elementem listy ze strzałką ">".
 Nie pokazujemy wszystkich przełączników i opcji na ekranie głównym ustawień.
+Na obecnym etapie ekran ustawień pokazuje tylko: Konto, System pracy - leadowanie, Sprzedaż oraz Wersja aplikacji 0.0.1.
 
 Po kliknięciu kategorii ekran szczegółów powinien wsuwać się płynnie z prawej strony.
 Przejścia w ustawieniach mają sprawiać wrażenie jednej spójnej, warstwowej przestrzeni.
-Podgląd onboardingu powinien działać jako popup albo warstwa nad aktualnym ekranem.
-Przejścia między krokami onboardingu mają być płynne, z lekkim przesunięciem i przenikaniem treści.
 
 ## Kafelki kontaktów
 Na kafelku kontaktu nie pokazujemy pełnego adresu ani numeru telefonu.
@@ -105,9 +108,9 @@ Kliknięcie koła chowa albo pokazuje kontakty danego statusu.
 Kolejność kół można zmieniać, a lista kontaktów układa się według tej samej kolejności.
 Kafelki kontaktów można przestawiać w obrębie ich statusu.
 Listę kontaktów odświeża się gestem pociągnięcia w dół, bez osobnego przycisku odświeżania w nagłówku.
-Przesunięcie kafelka kontaktu w prawo odsłania zielony przycisk przeniesienia do W realizacji.
-Przesunięcie kafelka kontaktu w lewo odsłania dwa przyciski akcji po prawej stronie: pomarańczowe Archiwum oraz czerwone Usuń.
-Każda z tych akcji wymaga potwierdzenia komunikatem „Czy na pewno? Akcji nie można odwrócić.”
+Przesunięcie kafelka kontaktu w prawo odsłania zielony przycisk przeniesienia do kolejnego etapu.
+Przesunięcie kafelka kontaktu w lewo odsłania czerwony przycisk Usuń.
+Usunięcie wymaga potwierdzenia komunikatem „Czy na pewno? Akcji nie można odwrócić.”
 W zakładce W realizacji nie ma akcji powrotu sprawy do Kontaktów.
 Kafelek realizacji nie pokazuje zielonego przycisku "Kontakt" po przesunięciu w prawo.
 
@@ -211,7 +214,7 @@ Przycisk “x”
 
 Po kliknięciu przycisku telefon aplikacja jest połączona z funkcją dzwonienia w telefonie i dzwoni do kontaktu.
 
-Po kliknięciu “X” kontakt zostanie przeniesiony do archiwum, ale agent zostaje zapytany przez system poprzez Pop Up, czy aby na pewno chce przenieść kontakt do archiwum?
+Po kliknięciu “X” kontakt zostaje usunięty po potwierdzeniu przez popup.
 
 ### 4. Statystyka
 W tej części dashboard powinny się pojawiać:

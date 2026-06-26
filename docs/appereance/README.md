@@ -26,10 +26,10 @@ Opis UX/UI poszczególnych ekranów i sekcji.
 Ten plik opisuje, jak mają wyglądać i zachowywać się konkretne części aplikacji:
 - Dashboard
 - Kontakty
+- Umówione spotkania
 - W realizacji
 - Statystyka
-- Konto
-- onboarding
+- Konto / Ustawienia otwierane z topbara
 - popupy
 - kafelki i listy
 - gesty i przejścia

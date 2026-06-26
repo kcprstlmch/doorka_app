@@ -135,8 +135,7 @@ Status Spad oznacza klienta, który po podpisaniu umowy i dodaniu do W realizacj
 Taki klient nadal liczy się jako dodany klient, ale dodatkowo zasila statystykę spadów.
 Przy statusie Spad można dodać uwagę / notatkę do klienta.
 
-Po ustawieniu statusu Spad aplikacja powinna pokazać przycisk Przenieś do archiwum.
-Klient ze statusem Spad zostaje w głównej liście W realizacji, dopóki agent nie kliknie Przenieś do archiwum.
+Klient ze statusem Spad zostaje obsługiwany w ramach W realizacji albo późniejszego osobnego przepływu zamykania spraw.
 
 ## Zakończone realizacje
 Po zakończeniu procesu, na przykład po montażu i domknięciu zgłoszeń, klient nie powinien dominować głównej listy W realizacji.

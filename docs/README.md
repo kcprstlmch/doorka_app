@@ -34,9 +34,10 @@ Obecnie aplikacja jest projektowana dla pojedynczych agentów. Panel firmowy, ma
 Agent może samodzielnie utworzyć konto w aplikacji.
 
 ## Kontakt
-Ktoś kogo agent pozyskał. Kontakt można dodać, usunąć, dodać do zakładki moi klienci oraz dodać do archiwum, można mu również zmienić status.
+Ktoś kogo agent pozyskał. Kontakt można dodać, usunąć, przenieść do umówionych spotkań albo dalej do realizacji, można mu również zmienić status.
 Status jest najbardziej podstawową określająca “wartość” danego kontaktu dla agenta.
-Archiwum to miejsce tz. śmietnik. Wrzucamy tam klientów. Archiwum można w pewnym momencie wyczyścić i usunąć permanentnie.
+Domyślne statusy w zakładce Kontakty to Do przedzwonienia i Do podjechania.
+Typ kontaktu jest osobną kolorową etykietą widoczną na kafelku kontaktu; jeśli nie jest wybrany, aplikacja pokazuje szary pill Typ kontaktu.
 Po dodaniu kontaktu do sekcji Moi Klienci kontakt automatycznie znika z listy kontaktów.
 
 Każdy kontakt jest indywidualnie przypisany do danego agenta.

@@ -5,6 +5,8 @@ class Contact {
     required this.phone,
     required this.address,
     required this.status,
+    required this.contactType,
+    required this.contactStatus,
     required this.note,
     required this.contactDate,
     required this.contactTime,
@@ -17,11 +19,42 @@ class Contact {
   final String phone;
   final String address;
   final String status;
+  final String contactType;
+  final String? contactStatus;
   final String note;
   final DateTime? contactDate;
   final String contactTime;
   final String contactQuality;
   final DateTime? contactNotification;
+
+  Contact copyWith({
+    String? contactName,
+    String? phone,
+    String? address,
+    String? status,
+    String? contactType,
+    String? contactStatus,
+    String? note,
+    DateTime? contactDate,
+    String? contactTime,
+    String? contactQuality,
+    DateTime? contactNotification,
+  }) {
+    return Contact(
+      id: id,
+      contactName: contactName ?? this.contactName,
+      phone: phone ?? this.phone,
+      address: address ?? this.address,
+      status: status ?? this.status,
+      contactType: contactType ?? this.contactType,
+      contactStatus: contactStatus ?? this.contactStatus,
+      note: note ?? this.note,
+      contactDate: contactDate ?? this.contactDate,
+      contactTime: contactTime ?? this.contactTime,
+      contactQuality: contactQuality ?? this.contactQuality,
+      contactNotification: contactNotification ?? this.contactNotification,
+    );
+  }
 
   factory Contact.fromMap(Map<String, dynamic> data) {
     return Contact(
@@ -30,6 +63,8 @@ class Contact {
       phone: data['phone']?.toString() ?? '',
       address: data['address']?.toString() ?? '',
       status: _normalizeContactStatus(data['status']?.toString() ?? ''),
+      contactType: data['contact_type']?.toString() ?? '',
+      contactStatus: data['contact_status']?.toString(),
       note: data['note']?.toString() ?? '',
       contactDate: DateTime.tryParse(data['contact_date']?.toString() ?? ''),
       contactTime: data['contact_time']?.toString() ?? '',

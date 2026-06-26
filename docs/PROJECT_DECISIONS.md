@@ -26,8 +26,10 @@ Konta agentów innych niż konto właściciela oraz większość danych testowyc
 Na etap 1 upraszczamy bazę Supabase.
 W schemacie `public` zostają tylko tabele `profiles`, `contacts` i `clients`.
 Nie tworzymy teraz osobnych tabel dla produktów, dokumentów, statusów ani historii statusów.
-Stare tabele z webowego CRM są usuwane albo traktowane jako do zastąpienia.
-SQL do ręcznego uruchomienia w Supabase SQL Editor znajduje się w `docs/SQL.md`.
+Stare tabele z webowego CRM traktujemy jako do audytu albo zastąpienia, ale ich usunięcie wymaga osobnej decyzji i osobnego skryptu destrukcyjnego.
+Nowe zmiany SQL do ręcznego uruchomienia w Supabase SQL Editor zapisujemy jako osobne migracje w `docs/sql/migrations/`.
+`docs/SQL.md` opisuje model danych i historyczny kontekst, ale nie powinien być miejscem dopisywania kolejnych dużych resetów.
+Skrypty czyszczące dane trzymamy tylko w `docs/sql/destructive/` i uruchamiamy po osobnej zgodzie.
 
 ## Zakres użytkowników
 Obecnie aplikacja jest projektowana dla pojedynczych agentów sprzedaży bezpośredniej.
@@ -38,16 +40,24 @@ Manager może mieć dostęp do statystyk agentów oraz wybranych danych o kontak
 
 ## Rejestracja
 Agent może samodzielnie utworzyć konto w aplikacji.
-Rejestracja podstawowa odbywa się przez e-mail i hasło.
-Docelowo aplikacja powinna umożliwiać rejestrację i logowanie przez Google Authentication, ale konfigurację tego odkładamy na późniejszy etap.
-Po rejestracji przez e-mail agent musi potwierdzić adres e-mail przed wejściem do aplikacji.
-Przy rejestracji przez Google Authentication nie wymagamy dodatkowego potwierdzenia e-mail.
+Na teraz do rejestracji konta wymagane są tylko e-mail i hasło.
+Nie wymagamy imienia, nazwiska, telefonu ani innych danych profilu na etapie rejestracji.
+Po rejestracji agent musi potwierdzić adres e-mail przed wejściem do aplikacji.
 Agent pozostaje zalogowany, dopóki sam się nie wyloguje.
 Na ekranie logowania ma być opcja Nie pamiętasz hasła?.
 Reset hasła dotyczy kont zakładanych przez e-mail i hasło. Agent wpisuje swój e-mail, a system wysyła wiadomość z resetem hasła.
-Reset hasła nie dotyczy użytkowników logujących się przez Google.
 
 ## Sekcje aplikacji
+Nowym rdzeniem aplikacji jest dzienniczek cyklu zycia kontaktu.
+Pierwsze trzy sekcje aplikacji to:
+- Kontakty / Zebrane leady
+- Umowione spotkania
+- W realizacji
+
+Dashboard przestaje byc glownym pierwszym ekranem pracy agenta.
+Najwazniejszy przeplyw to przechodzenie rekordu przez trzy etapy:
+`Kontakty` -> `Umowione spotkania` -> `W realizacji`.
+
 Zamknięte decyzje dotyczące głównych sekcji znajdują się w folderze `docs/sections/`:
 - Kontakty: `docs/sections/Contacts.md`
 - W realizacji: `docs/sections/In_process.md`
@@ -62,9 +72,18 @@ Na etapie projektowania i zmian UI nie wykonujemy automatycznie migracji ani nad
 ## Aktywność
 Na etap 1 nie tworzymy osobnych tabel historii statusów.
 Aktualny status trzymamy bezpośrednio w rekordzie kontaktu albo klienta.
+Własne statusy robocze agenta są na tym etapie warstwą UX zapisywaną jako preferencja aplikacji.
+Docelowo mogą zostać przeniesione do osobnej tabeli Supabase, jeśli będzie potrzebna synchronizacja między urządzeniami.
+
+Typ kontaktu jest osobną etykietą od statusu.
+Typ kontaktu jest wybierany z listy tworzonej w Ustawieniach i zapisuje się automatycznie po wyborze.
+W zakładce Kontakty domyślnie widoczne są tylko statusy Do przedzwonienia i Do podjechania; pozostałe statusy agent dodaje w Ustawieniach.
+
+Po zakończeniu cyklu pracy niedomknięte rekordy powinny trafić do Archiwum w Ustawieniach.
+Archiwum cyklu jest miejscem porządkowym, a nie główną sekcją pracy agenta.
 
 ## Regulamin i polityka prywatności
-Przy rejestracji agent musi zaakceptować regulamin oraz politykę prywatności.
+Na teraz rejestracja nie wymaga osobnego checkboxa regulaminu ani polityki prywatności.
 Dokumenty regulaminu i polityki prywatności będą opracowywane w osobnych wątkach.
 
 ## Usunięcie konta
@@ -77,12 +96,9 @@ Decyzje dotyczące mechaniki list kontaktów i W realizacji znajdują się w `do
 Decyzje dotyczące wyglądu list i kafelków znajdują się w `docs/appereance/UX_UI.md` oraz `docs/appereance/design.md`.
 
 ## Usuwanie danych
-Trwałe usuwanie kontaktu lub klienta jest możliwe tylko z archiwum.
-Przy trwałym usuwaniu aplikacja pokazuje popup potwierdzający. Nie wymagamy wpisywania słowa USUŃ.
-Z głównej listy kontaktów użytkownik może przenieść kontakt do archiwum, ale nie usuwa go trwale.
-Archiwum nie używa ikony kosza.
-Kosz oznacza trwałe usunięcie i musi wymagać potwierdzenia.
-W głównej liście kontaktów przesunięcie w lewo odsłania przyciski Archiwum i Usuń, ale sama czynność przesunięcia nie usuwa kontaktu.
+Kontakt może zostać usunięty bezpośrednio z listy po potwierdzeniu popupem.
+Przy usuwaniu aplikacja pokazuje popup potwierdzający. Nie wymagamy wpisywania słowa USUŃ.
+W głównej liście kontaktów przesunięcie w lewo odsłania tylko przycisk Usuń, ale sama czynność przesunięcia nie usuwa kontaktu.
 Przesunięcie w prawo odsłania dodanie do W realizacji.
 Każda akcja odsłonięta przez przesunięcie wymaga potwierdzenia.
 

@@ -15,9 +15,6 @@ Aktywny kafelek na Dashboardzie jest szerokim tematem i wymaga osobnej rozmowy.
 Nie wiadomo jeszcze, czym dokładnie będzie Szybka notatka.
 Wstępnie może to być informacja, którą później można przypisać do kontaktu, terenu albo nagrania.
 
-## Powiadomienia
-Nie wiadomo jeszcze, jakie zdarzenia mają generować powiadomienia.
-
 ## Produkt w Moi Klienci
 Nie wiadomo jeszcze, jak dokładnie obsłużyć produkt w sekcji Moi Klienci.
 

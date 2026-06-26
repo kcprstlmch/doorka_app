@@ -123,7 +123,7 @@ Docelowa paleta bazuje na obecnych kolorach aplikacji:
 
 ### Statusy i akcje
 - Błąd / usuwanie / negatywne akcje: `#D64545`
-- Pomarańczowy / archiwum / do podjechania: `#F0A202`
+- Pomarańczowy / do podjechania: `#F0A202`
 - Niebieski akcent: `#2563A9`
 - Niebieski status zainteresowania: `#5B7CFA`
 - Fioletowy status: `#7B61FF`
@@ -149,7 +149,6 @@ Czerwony:
 - decyzje wymagające uwagi
 
 Pomarańczowy:
-- archiwum
 - do podjechania
 - elementy pośrednie, które wymagają działania, ale nie są błędem
 
@@ -217,13 +216,9 @@ Top bar:
 - nie zmienia koloru przy scrollowaniu
 - ma delikatną dolną linię `#E4E0D7`
 - po lewej pokazuje logo Doorka
-- po prawej pokazuje ikonę powiadomień
-- ikona powiadomień ma czerwoną kropkę `#E53935`
-
-Ikona powiadomień została lekko powiększona i odsunięta od prawej krawędzi.
-
-W przyszłości zostanie dodany jeszcze przycisk menu na prawo od ikony dzwoneczka.
-Po jego kliknięciu ma wyświetlić się lista najważniejszych sekcji.
+- po prawej pokazuje avatar albo inicjały handlowca
+- kliknięcie avatara/inicjałów otwiera Konto/Ustawienia animacją wysunięcia z prawej strony
+- panel Konto/Ustawienia przykrywa cały ekran, razem z topbarem i dolną nawigacją
 
 ## Dolny panel nawigacji
 Dolny panel:
@@ -235,11 +230,13 @@ Dolny panel:
 Aktualne zakładki:
 - Dashboard
 - Kontakty
+- Umówione
 - W realizacji
 - Statystyka
-- Konto
 
-Zakładka Konto w dolnym panelu pokazuje inicjały agenta albo avatar zamiast zwykłej ikony użytkownika.
+Konto nie jest zakładką w dolnym panelu.
+Avatar albo inicjały agenta są widoczne w topbarze po prawej stronie, bez podpisu tekstowego.
+Kliknięcie avatara/inicjałów otwiera pełnoekranowy panel Konto/Ustawienia.
 
 Przycisk szybkiej akcji FAB:
 - koncepcyjnie ma zielone tło i biały plus na środku
@@ -248,6 +245,7 @@ Przycisk szybkiej akcji FAB:
 - na obecnym etapie jest schowany, niewidoczny i nieklikalny
 
 ## Konto i ustawienia
+Kafelek profilu na ekranie Konto ma wyróżniać się od pozostałych kafelków mocniejszym tłem.
 Ekran Konto:
 - pokazuje profil agenta na górze
 - używa inicjałów w delikatnym zielonym tle albo zdjęcia profilowego
@@ -256,9 +254,18 @@ Ekran Konto:
 Główny ekran ustawień wizualnie jest prostą listą kategorii.
 Każda kategoria:
 - jest osobnym kafelkiem/listowym elementem
-- ma ikonę po lewej
-- ma nazwę i krótki opis
-- ma strzałkę `>` po prawej
+- ma nazwę
+- nie pokazuje ikony po lewej
+- nie pokazuje podtytułu
+- ma strzałkę `>` po prawej, jeśli otwiera ekran szczegółów
+
+Aktualne kategorie ustawień:
+- Konto
+- System pracy - leadowanie
+- Sprzedaż
+- Wersja aplikacji: 0.0.1
+
+Kafelek wersji aplikacji jest informacyjny i nie musi mieć strzałki.
 
 Po kliknięciu kategorii ekran szczegółów wsuwa się z prawej strony.
 Przejścia w ustawieniach mają sprawiać wrażenie jednej, warstwowej przestrzeni.
@@ -390,7 +397,7 @@ Kolorowe koła statusów:
 
 Przesunięcia kafelka:
 - w prawo: zielona akcja przeniesienia do W realizacji
-- w lewo: pomarańczowe Archiwum i czerwone Usuń
+- w lewo: czerwone Usuń
 
 W zakładce W realizacji nie ma akcji powrotu sprawy do Kontaktów.
 
@@ -403,7 +410,7 @@ Ostatnio dodany kontakt w Dashboardzie pokazuje:
 - po prawej przycisk X
 
 Po kliknięciu przycisku telefonu aplikacja korzysta z funkcji dzwonienia w telefonie.
-Po kliknięciu X kontakt ma zostać przeniesiony do archiwum po potwierdzeniu popupem.
+Po kliknięciu X kontakt ma zostać usunięty po potwierdzeniu popupem.
 
 ## Przyciski i inputy
 Inputy:

@@ -87,13 +87,13 @@ Kafelek "W tym tygodniu" na Dashboardzie ma byc oparty o:
 
 - Jeden agent nie moze miec dwoch kontaktow z tym samym numerem telefonu.
 - Jesli agent probuje dodac kontakt z numerem, ktory juz istnieje u tego samego agenta, aplikacja ma pokazac komunikat i zablokowac dodanie kontaktu.
-- Archiwum kontaktow ma byc dostepne w ustawieniach konta jako zakladka "Archiwum kontaktow".
+- Kontakty usuwa sie bez osobnego ekranu posredniego.
 
 ### Do pozniejszego dopracowania
 
 - Jak dokladnie odroznic "Szybki kontakt" od "Umowione spotkanie".
 - Jak maja dzialac przypomnienia: po co, kiedy, dla kogo i w jakiej formie.
-- Jak ma wygladac archiwum kontaktow i przywracanie kontaktu.
+- Jak ma wygladac docelowe zamykanie albo usuwanie kontaktow bez osobnego ekranu posredniego.
 
 ## W realizacji
 
@@ -228,18 +228,16 @@ Umowione spotkanie jest zawsze czescia pozyskanych leadow.
 
 - Ustawienia sa osobnym ekranem kategorii.
 - Nie pokazujemy wszystkich opcji naraz na glownym ekranie ustawien.
-- Archiwum kontaktow ma byc jedna z sekcji w ustawieniach.
-- Archiwum kontaktow znajduje sie w kategorii Konto.
-- Z archiwum agent moze przywrocic kontakt do aktywnej listy kontaktow.
+- Aktualne ustawienia sa uproszczone do sekcji: Konto, System pracy - leadowanie, Sprzedaz oraz Wersja aplikacji 0.0.1.
+- Konto zawiera: imie i nazwisko, adres e-mail, numer telefonu, numer agenta oraz wylogowanie.
+- System pracy - leadowanie zawiera: ilosc cykli 2/3, cel umowionych spotkan i przelacznik celu tygodniowego.
+- Sprzedaz zawiera wybor produktow: Panele, Magazyny, Dachy, Zestawy, Ocieplenia, Ogrzewanie, Turbiny wiatrowe.
 
 ### Do pozniejszego dopracowania
 
 - Zapisywanie preferencji uzytkownika.
-- Domyslny zakres porownania Dashboardu.
-- Powiadomienia.
-- Onboarding.
 - Zdjecie profilowe w Supabase Storage.
-- Zmiana hasla, wylogowanie i usuniecie konta jako pelny proces.
+- Zmiana hasla i usuniecie konta jako pelny proces.
 
 ## Supabase
 
@@ -261,7 +259,6 @@ Do tematu wrocimy osobno, szczegolnie w kontekscie:
 - Polityka prywatnosci i regulamin.
 - Przypomnienia.
 - Planowanie miesiaca, tygodnia i dnia.
-- Pelne archiwum kontaktow.
 - Pelny widok szczegolowy realizacji.
 - Tryb ciemny / jasny i psychologia wyboru motywu.
 
@@ -270,4 +267,4 @@ Do tematu wrocimy osobno, szczegolnie w kontekscie:
 - Jak dokladnie definiujemy "umowe przeprocesowana"?
 - Czy Dashboard ma porownywac dane zawsze tydzien do tygodnia, czy wedlug ustawienia uzytkownika?
 - Czy szybki kontakt ma miec osobny minimalny formularz, czy korzystac z tego samego procesu dodawania kontaktu?
-- Jakie dane maja byc widoczne w archiwum kontaktow?
+- Jakie dane maja byc widoczne w zamknietych albo usunietych kontaktach, jesli taki widok kiedys powstanie?
