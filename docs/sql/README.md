@@ -21,6 +21,12 @@ Bezpieczne operacje:
 - `create index if not exists`
 - `drop policy if exists` + `create policy`, gdy poprawiamy RLS
 
+Aktualny dziennik zdarzen kontaktu jest w migracji:
+
+- `migrations/20260626_120000_contact_events_journal.sql`
+
+Ta migracja nie kasuje danych. Dodaje trwala historie kontaktow i wspiera zasade, ze przycisk `Usun` w aplikacji ukrywa kontakt z aktywnej pracy, ale nie usuwa go permanentnie z bazy.
+
 Operacje wymagajace osobnej zgody:
 
 - `delete from`

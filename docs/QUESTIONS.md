@@ -82,7 +82,7 @@ Czy kontakty ze statusem Umówione spotkanie mają być sortowane po dacie i god
 
 ### Priorytety kontaktów
 Czy agent ma oznaczać kontakt jako ważny?
-Czy jakość S/M/L/XL ma być traktowana jako priorytet?
+Czy kontakt oznaczony gwiazdką ma być traktowany jako priorytet?
 Czy aplikacja ma sama podpowiadać kontakty wymagające działania?
 
 ### Dzwonienie
@@ -115,10 +115,11 @@ Czy kolory statusów mają być ustawiane ręcznie przez agenta?
 Czy domyślne statusy mają mieć domyślne kolory?
 Czy kolor statusu ma być widoczny jako pasek, tło karty, badge, czy nagłówek?
 
-### Jakość spotkania S/M/L/XL
-Co oznaczają wartości S, M, L, XL?
-Czy jakość ma wpływać na statystyki albo priorytet spotkania?
-Czy agent może edytować listę jakości?
+### Ulubiony kontakt i jakość
+Agent może oznaczyć kontakt gwiazdką jako ulubiony / szczególnie ważny.
+Gwiazdka jest widoczna obok nazwy kontaktu.
+Kontakt może mieć też jakość/potencjał: `TOP`, `Mocny`, `Relacja`, `Słaby`.
+Jakość wpływa na sortowanie kontaktów pod ulubionymi kontaktami.
 
 ### Produkty w kontaktach
 Czy agent może zmienić produkt po przeniesieniu do Moi Klienci?
@@ -156,12 +157,10 @@ Czy spad ma być widoczny na Dashboardzie?
 ### Konwersja
 Czy aplikacja ma pokazywać kilka rodzajów konwersji?
 
-### Sesja leadowania
-Czy podczas sesji leadowania aplikacja ma liczyć dodane kontakty i umówione spotkania w czasie rzeczywistym?
-
-### Cele sesji leadowania
-Czy aplikacja pyta o cel tylko przy starcie sesji, czy cel może być domyślny?
-Czy agent może zakończyć sesję bez osiągnięcia celu?
+### Szybkie akcje na Dashboardzie
+Dashboard nie ma juz sesji leadowania uruchamianej przyciskiem Start.
+Aplikacja nie liczy czasu pracy w aktywnym panelu.
+Na gorze Dashboardu sa stale widoczne szybkie akcje: Umow spotkanie, Dodaj kontakt, Kontakt roboczy i Dodaj wlasne.
 
 ### Motywacyjne elementy
 Czy cytaty motywacyjne mają być w aplikacji?
@@ -239,7 +238,7 @@ Status Do podjechania ma pole termin.
 
 ### Umówione spotkanie
 Przy statusie Umówione spotkanie obowiązkowe są data, godzina i produkt.
-Jakość nie jest obowiązkowa.
+Skala jakości spotkania nie jest używana.
 Aplikacja domyślnie wybiera kolejny dzień oraz może ustawić godzinę 18:00.
 
 ### Do przedzwonienia
@@ -284,12 +283,9 @@ Spisana umowa liczy się w statystykach dopiero po dodaniu do Moi Klienci.
 Spad liczymy jako konwersję: (spisana umowa -> Moi Klienci) / status Spad i pokazujemy procentowo.
 Tydzień w statystykach zaczyna się w poniedziałek.
 
-### Sesja leadowania
-Rozpocznij leadowanie uruchamia licznik czasu.
-Agent może pauzować sesję.
-Cel sesji obejmuje liczbę umówionych spotkań oraz liczbę zebranych kontaktów.
-Po zakończeniu sesji ma pojawić się podsumowanie.
-Funkcja Zamknij dzień pojawia się wtedy, gdy agent zrealizuje cel danego spotkania/sesji leadowania.
+### Szybkie akcje na Dashboardzie
+Aktywny panel i licznik czasu leadowania zostaly usuniete z biezacej mechaniki.
+Agent od razu korzysta z akcji na gorze Dashboardu, bez rozpoczynania i konczenia sesji.
 
 ### Produkty
 Produkt przy Umówione spotkanie jest technicznym polem kontaktu.
@@ -314,7 +310,7 @@ Pełny adres kontaktu ma być widoczny dopiero w szczegółach, nie na liście.
 Kafelek klienta w Moi Klienci pokazuje co najmniej: dane klienta, adres zamieszkania, produkt, kwotę netto, datę podpisania umowy i status klienta.
 
 ### Dashboard
-Dashboard i aktywny kafelek są szerokim tematem i wrócimy do nich później.
+Dashboard zaczyna się od kafelka szybkich akcji, bez aktywnego panelu czasu.
 Dashboard ma pokazywać dzisiejsze i najbliższe kontakty do zadzwonienia albo podjechania.
 Agent może zmienić godzinę spotkania bezpośrednio z Dashboardu.
 

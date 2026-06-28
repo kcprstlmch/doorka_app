@@ -103,7 +103,7 @@ Docelowa paleta bazuje na obecnych kolorach aplikacji:
 
 ### Kolor marki / akcje pozytywne
 - Główna zieleń Doorka: `#2F5D50`
-- Jasna zieleń przycisku Start: `#62BE72`
+- Jasna zieleń akcji pozytywnej: `#62BE72`
 - Zielony akcent postępu/onboardingu: `#54D376`
 - Bardzo jasne zielone tło ikon/inicjałów: `#E7EFE8`
 - Jasne zielone tło elementów aktywnych: `#EAF2EF`
@@ -158,7 +158,6 @@ Szary:
 - elementy drugorzędne
 
 Czarny / bardzo ciemny:
-- aktywny kafelek
 - elementy o wysokim priorytecie
 - nie nadużywać na dużych powierzchniach poza kluczowymi kafelkami
 
@@ -195,7 +194,7 @@ Domyślny promień większości elementów:
 Elementy okrągłe:
 - avatar / inicjały: pełne koło
 - małe znaczniki i progress bary: radius `999px`
-- przycisk Start w aktywnym kafelku: docelowo okrągły / mocno zaokrąglony
+- małe znaczniki statusu: pełne koło albo radius `999px`
 
 Popup onboardingu ma większy promień:
 - `18px`
@@ -287,61 +286,23 @@ Przejścia między krokami onboardingu:
 Dashboard nie ma dodatkowego nagłówka z nazwą sekcji.
 Treść zaczyna się od właściwych modułów.
 
-Aktywny kafelek:
-- ma czarne / bardzo ciemne tło
-- używa białych i jasnozielonych napisów
-- pokazuje kontekst dnia pracy
-- zawiera przycisk Start / akcję po prawej stronie
+Kafelek szybkich akcji:
+- jest pierwszym elementem Dashboardu
+- zastępuje dawny aktywny kafelek leadowania
+- nie ma przycisku Start, Przerwa, Koniec ani licznika czasu
+- pokazuje cztery najważniejsze akcje agenta w siatce 2x2
 
-Przycisk Start:
-- ma jasne zielone tło
-- ma biały napis i białą ikonę
-- ma wyglądać jak wyraźny element do kliknięcia
-- docelowo jest mały i mocno zaokrąglony
+Szybkie akcje:
+- Umów spotkanie
+- Dodaj kontakt
+- Kontakt roboczy
+- Dodaj własne
 
-Przycisk "Ustal cel":
-- ma niebieskie tło
-- ma biały napis
-- ma ikonę check
-- jeśli agent próbuje rozpocząć leadowanie bez celu, przycisk powinien pulsować zamiast pokazywać popup
-
-Nagłówek aktywnego kafelka pokazuje datę i dzień tygodnia w formacie `14.06 | Niedziela`.
-Główna treść aktywnego kafelka to "Leadowanie".
-Cel na dzisiaj nie pokazuje liczby, dopóki agent nie kliknie "Ustal cel" i nie poda wartości.
-
-Po kliknięciu Start aktywny kafelek pokazuje:
-- licznik czasu leadowania w formacie stopera `00:00:00`
-- obecnie umówione spotkania w tej sesji
-- kontakty dodane w tej sesji
-
-Licznik czasu pojawia się obok napisu "Czas leadowania" i jest oddzielony znakiem `|`.
-
-Szybkie akcje pod aktywnym kafelkiem:
-- są ułożone w jednym rzędzie
-- zajmują całą szerokość ekranu
-- każda szybka akcja ma inne obramowanie
-- akcja "Umów spotkanie" korzysta z formularza dodawania kontaktu ze statusem Umówione spotkanie
-- akcja "Szybki kontakt" korzysta z formularza dodawania kontaktu ze statusem Szybki kontakt
-- akcja "Szybka notatka" otwiera prosty input tekstowy bez dodatkowych pól
-
-Przycisk Przerwa:
-- nie znajduje się na aktywnym kafelku
-- pojawia się po prawej stronie rzędu szybkich akcji
-- ma czerwone obramowanie
-- ma czerwony akcent
-- ma przezroczyste albo jasne tło
-
-Po kliknięciu "Przerwa" aplikacja pokazuje dwa przyciski: "Wznów" oraz "Koniec".
-
-Popup zakończenia sesji leadowania:
-- pojawia się po kliknięciu "Koniec"
-- gratuluje agentowi zakończenia leadowania
-- nagłówek ma kończyć się wykrzyknikiem
-- pokazuje liczbę umówionych spotkań
-- pokazuje liczbę zebranych kontaktów
-- pokazuje czas pracy
-- pokazuje czas przerwy
-- ma efekt celebracji/fajerwerków za popupem, w tle, a nie w środku treści
+Przyciski szybkich akcji:
+- zajmują po połowie szerokości rzędu
+- mają równą wysokość
+- mają delikatne odstępy między sobą
+- korzystają z ikon i krótkich nazw
 
 Szybka notatka:
 - pojawia się na Dashboardzie jako osobny kafelek albo lista notatek

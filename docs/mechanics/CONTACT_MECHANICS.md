@@ -147,8 +147,23 @@ Domyslne statusy robocze to:
 Domyslne statusy robocze maja od razu byc widoczne w Ustawieniach jako normalne pozycje.
 Agent moze je edytowac albo usunac, tak jak wlasne statusy.
 
-Kontakt domyslnie moze nie miec statusu roboczego.
-Brak statusu kontaktu jest zapisywany jako `NULL` w `contacts.contact_status`.
+Kontakt bez wybranego typu i bez wybranego statusu roboczego jest traktowany jako `Robocze`.
+To jest stan domyslny dla szybkiego kontaktu wrzuconego przez agenta bez klasyfikacji.
+Nowe kontakty dodane bez typu i statusu powinny zapisac `contacts.contact_status = 'working'`.
+Starsze kontakty bez typu i bez statusu aplikacja moze pokazywac jak `Robocze` nawet wtedy, gdy w SQL maja jeszcze `NULL`.
+
+## Dashboard i szybkie akcje
+Dashboard nie uruchamia juz osobnej sesji leadowania.
+Nie ma aktywnego panelu, przycisku Start, pauzy ani licznika czasu pracy.
+
+Pierwszym elementem Dashboardu jest kafelek szybkich akcji:
+- Umow spotkanie,
+- Dodaj kontakt,
+- Kontakt roboczy,
+- Dodaj wlasne.
+
+Akcje sa dostepne od razu po wejsciu na Dashboard.
+Mechanika ma wspierac szybkie dodanie inputu przez agenta bez wymagania rozpoczecia dnia albo pamietania o stoperze.
 
 Statusy kontaktow agent tworzy w Ustawieniach.
 Statusy maja nazwe, kolor i ikone.
@@ -277,6 +292,76 @@ Do archiwum cyklu trafiaja:
 
 Archiwum jest sekcja porzadkowa w Ustawieniach.
 Nie jest glownym ekranem pracy agenta.
+
+## Statystyki tygodniowe i cykl pracy terenowej
+
+To jest jedna z kluczowych zasad core aplikacji:
+aplikacja musi rozrozniac date umowienia spotkania od daty samego spotkania.
+
+Przyklad pracy:
+- w poniedzialek 22 czerwca agent jest na leadach,
+- umawia 7 spotkan na wtorek 23 czerwca,
+- umawia 2 spotkania na czwartek 25 czerwca,
+- wynik poniedzialkowego leadowania to 9 umowionych spotkan,
+- mimo ze spotkania sa na wtorek i czwartek, licza sie jako umowione w poniedzialek, bo wtedy agent je pozyskal.
+
+Jesli w srode agent znowu jest na leadach i umawia 7 spotkan na czwartek,
+to wynik srodowego leadowania to 7 umowionych spotkan.
+Na czwartek moze byc wtedy lacznie 11 spotkan do odbycia:
+- 2 przeniesione/umowione juz w poniedzialek,
+- 2 przelozone z wtorku,
+- 7 nowych umowionych w srode.
+
+Wniosek:
+- wynik konkretnego dnia leadowania moze liczyc spotkania po dacie dodania/umowienia rekordu,
+- kafelek tygodniowy Dashboardu `Umowione spotkania` liczy spotkania po dacie spotkania (`contact_date`), czyli ile spotkan przypada na dany tydzien,
+- `Odbyte spotkania` licza sie po faktycznym wyniku spotkania,
+- `Spisane umowy` licza sie po dacie podpisania umowy (`contract_signed_at`).
+
+Tydzien statystyczny zaczyna sie zawsze w poniedzialek o 00:00.
+Konczy sie przed kolejnym poniedzialkiem o 00:00.
+
+Dashboard tygodniowy ma pokazywac automatycznie:
+- spisane umowy,
+- odbyte spotkania,
+- umowione spotkania.
+
+Te liczby nie moga byc reczne.
+Maja wynikac z danych zapisanych w aplikacji.
+Nawet jesli na poczatku przeliczenie bedzie niedoskonale, kierunek musi byc taki, ze aplikacja sama liczy prace agenta z dat i statusow.
+
+## Dziennik zdarzen kontaktu
+
+Dziennik zdarzen kontaktu jest trwalym zapisem tego, co dzialo sie z kontaktem.
+To jest fundament statystyk historycznych.
+
+Aktualny status kontaktu moze sie zmieniac wiele razy.
+Kontakt moze zniknac z aktywnego widoku.
+Moze wrocic do kontaktow, przejsc do umowionych spotkan, trafic do realizacji albo zostac ukryty.
+
+Dlatego statystyki docelowo nie powinny opierac sie tylko na aktualnym stanie rekordu.
+Prawda historyczna ma wynikac z tabeli `contact_events`.
+
+Dziennik zapisuje zdarzenia takie jak:
+- utworzono kontakt,
+- zmieniono typ kontaktu,
+- zmieniono status kontaktu,
+- umowiono spotkanie,
+- przelozono spotkanie,
+- spotkanie niesprzedane,
+- spotkanie nieodbyte,
+- spisano umowe,
+- kontakt usunieto z aktywnego widoku.
+
+Zasada usuwania:
+agent nie kasuje kontaktu permanentnie.
+Przycisk `Usun` oznacza ukrycie kontaktu z aktywnej pracy.
+Rekord zostaje w bazie, dostaje `archived_at`, a dziennik zapisuje zdarzenie `contact_hidden`.
+
+Permanentne kasowanie danych moze wykonywac tylko admin na poziomie bazy albo osobnego panelu administracyjnego.
+
+W szczegolach kontaktu na dole widoczna jest sekcja `Historia zdarzen kontaktu`.
+W ustawieniach docelowo moze powstac zbiorczy widok historii kontaktow, gdzie agent zobaczy kontakty ukryte z aktywnych list.
 
 ## Zasada projektowa
 

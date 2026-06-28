@@ -49,14 +49,9 @@ Spad liczymy jako konwersję:
 Wynik pokazujemy procentowo.
 Spad oznacza klienta, który po podpisaniu umowy i dodaniu do W realizacji rezygnuje.
 
-## Czas leadowania
-Czas leadowania jest liczony na podstawie sesji leadowania z Dashboardu.
-Start -> Koniec to jedna sesja leadowania.
-
-Po zakończeniu sesji:
-- czas pracy dodaje się do łącznego czasu leadowania
-- liczba sesji leadowania zwiększa się o 1
-- dane z popupu podsumowania sesji zapisują się do statystyk
+## Czas pracy
+Dashboard nie liczy juz czasu leadowania przez przycisk Start/Koniec.
+Czas pracy moze wrocic jako zaawansowana statystyka, ale musi byc zaprojektowany tak, zeby nie wymagal od agenta pilnowania stopera.
 
 ## Zakresy danych
 Nad kafelkami statystyk znajduje się filtr zakresu danych:

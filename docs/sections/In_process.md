@@ -129,6 +129,8 @@ Etap 2 zależy od typu klienta:
 ## Historia etapów
 Agent ma widzieć, na jakim etapie jest sprawa oraz jaki etap był wcześniej.
 W szczegółach sprawy W realizacji agent ma widzieć historię zmian etapów/statusów z dokładną datą i godziną zmiany.
+W szczegółach sprawy W realizacji wybór etapu ma być widoczny od razu, bez wchodzenia w tryb pełnej edycji danych klienta.
+Zmiana etapu zapisuje się po wyborze z listy.
 
 ## Status Spad
 Status Spad oznacza klienta, który po podpisaniu umowy i dodaniu do W realizacji rezygnuje.

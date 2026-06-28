@@ -6,43 +6,26 @@ Opisuje aktualny ekran glowny i uproszczona mechanike dnia umawiania spotkan.
 ## Rola sekcji
 Dashboard jest glownym ekranem pracy agenta.
 Ma szybko pokazac:
-- aktywny dzien umawiania spotkan,
-- obecny cel,
-- umowione spotkania,
+- szybkie akcje pracy agenta,
 - zebrane kontakty,
 - przypomnienia i powiadomienia,
 - wyniki tygodnia.
 
-## Aktywny kafelek
-Aktywny kafelek pokazuje dzien umawiania spotkan.
-Po kliknieciu Start uruchamia licznik czasu.
-Licznik czasu pracy dziala takze po schowaniu aplikacji.
+## Szybkie akcje na gorze
+Dashboard nie ma juz aktywnego kafelka dnia, przycisku Start ani licznika czasu leadowania.
+Pierwszym elementem na gorze Dashboardu jest kafelek szybkich akcji.
 
-Przycisk `Przerwa` zatrzymuje licznik czasu pracy i zaczyna liczyc czas przerwy.
-Po ponownym kliknieciu przycisk zmienia sie w `Wznow` i licznik czasu pracy rusza dalej.
-Czas przerwy jest zapisywany osobno jako `break_seconds`.
-
-Przycisk `Koniec leadowania` konczy aktywna sesje.
-Po zakonczeniu aplikacja zapisuje czas pracy jako `work_seconds` i laczny czas przerwy jako `break_seconds`.
-
-Kafelek pokazuje:
-`Obecny cel: X/Y | Kontakty: Z | 00:00:00`
-
-`X` to liczba umowionych spotkan wynikajaca z faktycznych rekordow spotkan na dany dzien.
-Nie zalezy od tego, ile razy agent kliknal Start.
-
-## Akcje w aktywnym kafelku
-Po uproszczeniu zostaja glowne akcje:
+Glowne akcje:
 - Umow spotkanie
 - Dodaj kontakt
-- Przerwa / Wznow
-- Koniec leadowania
-
-Nie ma juz szybkich akcji:
 - Kontakt roboczy
-- Do podjechania
-- Do przedzwonienia
-- Szybka notatka
+- Dodaj wlasne
+
+Akcje sa zawsze widoczne, bez rozpoczynania sesji.
+Klikniecie `Umow spotkanie` otwiera formularz dodawania kontaktu jako umowione spotkanie.
+Klikniecie `Dodaj kontakt` otwiera formularz zwyklego kontaktu.
+Klikniecie `Kontakt roboczy` tworzy kontakt roboczy zgodnie z zasada: brak typu i brak statusu oznacza kontakt roboczy.
+Klikniecie `Dodaj wlasne` prowadzi do konfiguracji wlasnych statusow/ustawien kontaktow.
 
 ## Umowione spotkania
 Sekcja Umowione spotkania pokazuje rekordy ze statusem `scheduled_meeting`.
@@ -104,3 +87,20 @@ Kontakt nie dubluje wyniku spotkania.
 ## W tym tygodniu
 Kafelek W tym tygodniu pokazuje podsumowanie wynikow i porownania.
 Jego dane powinny wynikac z kontaktow, spotkan i spraw W realizacji, a nie z recznego dopisywania.
+
+Aktualny kafelek statystyk pokazuje automatycznie:
+- Spisane umowy,
+- Odbyte spotkania,
+- Umowione spotkania.
+
+Tydzien liczony jest od poniedzialku 00:00 do kolejnego poniedzialku 00:00.
+
+`Umowione spotkania` w statystyce tygodniowej oznaczaja spotkania przypadajace na dany tydzien, czyli liczone po `contact_date`.
+Jesli rekord ma date spotkania i godzine, aplikacja traktuje go jako umowione spotkanie nawet wtedy, gdy agent nie kliknal dodatkowej akcji przy spotkaniu.
+Przyklad: jesli agent we wtorek ma 7 spotkan, a w czwartek ma 11 spotkan, to tygodniowo powinno pokazac 18 umowionych spotkan.
+
+Wynik konkretnego dnia leadowania to osobna metryka i moze liczyc spotkania po dacie ich dodania/umowienia.
+
+`Odbyte spotkania` wynikaja ze statusu/wyniku spotkania albo z tego, ze zaplanowana godzina spotkania juz minela.
+To zabezpiecza sytuacje terenowa, w ktorej agent byl na spotkaniu, ale nie kliknal nic w aplikacji.
+`Spisane umowy` wynikaja z daty podpisania umowy.

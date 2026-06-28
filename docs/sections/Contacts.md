@@ -61,8 +61,9 @@ Etap systemowy decyduje, gdzie rekord jest widoczny w aplikacji:
 - W realizacji.
 
 Status roboczy agenta opisuje sytuację w ramach etapu `Kontakty`.
-Domyślnie kontakt nie musi mieć statusu roboczego.
-Brak statusu kontaktu jest zapisywany w SQL jako `NULL` w polu `contacts.contact_status`.
+Jeżeli kontakt nie ma wybranego typu ani statusu roboczego, aplikacja traktuje go jako `Robocze`.
+Nowy kontakt bez typu i statusu zapisuje się domyślnie z `contacts.contact_status = 'working'`.
+Starsze kontakty, które w SQL mają `NULL`, ale nie mają też typu, mogą być pokazywane w aplikacji jako `Robocze`.
 
 Statusy robocze agent dodaje i edytuje w Ustawieniach.
 Status roboczy ma nazwę i kolor nadawany automatycznie przez system.

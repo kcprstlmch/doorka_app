@@ -12,6 +12,7 @@ class Contact {
     required this.contactTime,
     required this.contactQuality,
     required this.contactNotification,
+    required this.archivedAt,
   });
 
   final String id;
@@ -26,6 +27,7 @@ class Contact {
   final String contactTime;
   final String contactQuality;
   final DateTime? contactNotification;
+  final DateTime? archivedAt;
 
   Contact copyWith({
     String? contactName,
@@ -39,6 +41,7 @@ class Contact {
     String? contactTime,
     String? contactQuality,
     DateTime? contactNotification,
+    DateTime? archivedAt,
   }) {
     return Contact(
       id: id,
@@ -53,6 +56,7 @@ class Contact {
       contactTime: contactTime ?? this.contactTime,
       contactQuality: contactQuality ?? this.contactQuality,
       contactNotification: contactNotification ?? this.contactNotification,
+      archivedAt: archivedAt ?? this.archivedAt,
     );
   }
 
@@ -72,6 +76,41 @@ class Contact {
       contactNotification: DateTime.tryParse(
         data['contact_notification']?.toString() ?? '',
       ),
+      archivedAt: DateTime.tryParse(data['archived_at']?.toString() ?? ''),
+    );
+  }
+}
+
+class ContactEvent {
+  const ContactEvent({
+    required this.id,
+    required this.contactId,
+    required this.eventType,
+    required this.eventNote,
+    required this.metadata,
+    required this.createdAt,
+  });
+
+  final String id;
+  final String contactId;
+  final String eventType;
+  final String eventNote;
+  final Map<String, dynamic> metadata;
+  final DateTime? createdAt;
+
+  factory ContactEvent.fromMap(Map<String, dynamic> data) {
+    final rawMetadata = data['metadata'];
+    return ContactEvent(
+      id: data['id']?.toString() ?? '',
+      contactId: data['contact_id']?.toString() ?? '',
+      eventType: data['event_type']?.toString() ?? '',
+      eventNote: data['event_note']?.toString() ?? '',
+      metadata: rawMetadata is Map<String, dynamic>
+          ? rawMetadata
+          : rawMetadata is Map
+          ? Map<String, dynamic>.from(rawMetadata)
+          : const {},
+      createdAt: DateTime.tryParse(data['created_at']?.toString() ?? ''),
     );
   }
 }

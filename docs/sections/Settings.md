@@ -56,7 +56,7 @@ Sekcja System pracy - leadowanie zawiera:
 - Pokazywać cel tygodniowy? przełącznik tak / nie
 
 Cel umówionych spotkań jest domyślnie ustawiany jako liczba spotkań.
-Ustawienie celu ma wpływać na aktywny kafelek pracy i sposób pokazywania postępu agenta.
+Ustawienie celu ma wpływać na statystyki tygodniowe i sposób pokazywania postępu agenta.
 
 ## 3. Sprzedaż
 Sekcja Sprzedaż zawiera wybór produktów, które agent może mieć aktywne w aplikacji:

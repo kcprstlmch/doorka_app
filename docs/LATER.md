@@ -4,8 +4,8 @@ Ten plik zbiera funkcje, pomysły i decyzje odłożone na później.
 Nie oznacza to podziału MVP ani planu płatnego. To parking dla tematów, których nie projektujemy szczegółowo teraz.
 
 ## Dashboard
-Decyzja o trzech najważniejszych informacjach widocznych po otwarciu aplikacji zostaje odłożona.
-Aktywny kafelek na Dashboardzie jest szerokim tematem i wrócimy do niego później.
+Dashboard zaczyna sie od kafelka szybkich akcji.
+Ewentualne dodatkowe informacje nad statystykami zostaja do pozniejszego dopracowania, ale nie wracamy na ten moment do aktywnego panelu ze stoperem.
 
 ## Szybka notatka
 Szybka notatka zostaje jako pomysł na późniejszy etap.
@@ -24,18 +24,17 @@ Status "Do realizacji" może wrócić jako jeden ze statusów, ale na ten moment
 
 ## Statystyki zaawansowane
 Na późniejszym etapie można dodać:
-- czas leadowania
+- czas pracy / czas w terenie, jesli znajdziemy sposob bez obciazania agenta stoperem
 - średni czas spotkania sprzedażowego
 - średni czas spotkania, gdzie klient jest zainteresowany
 - inne statystyki jakościowe pracy agenta
 
 ## Cele leadowania
-Agent prawdopodobnie będzie ustawiał cel po kliknięciu Rozpocznij leadowanie.
-Dokładny proces zostaje do dopracowania.
+Cel umawiania spotkań jest ustawieniem systemu pracy, a nie elementem startu sesji.
+Dokładny proces jego prezentowania zostaje do dopracowania.
 
 ## Zamknij dzień
-Funkcja Zamknij dzień pojawia się wtedy, gdy agent zrealizuje cel danego spotkania/sesji leadowania.
-Szczegóły ekranu podsumowania zostają do dopracowania.
+Ewentualne podsumowanie dnia/cyklu zostaje do dopracowania jako osobny mechanizm, bez aktywnego panelu czasu.
 
 ## Offline
 Na teraz zakładamy, że internet jest dostępny.

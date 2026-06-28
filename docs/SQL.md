@@ -9,6 +9,7 @@ Migracje mają dotyczyć tylko zakresu wskazanego przez użytkownika i powinny u
 Skrypty czyszczące lub resetujące dane trzymamy wyłącznie w `docs/sql/destructive/` i uruchamiamy tylko po osobnej, wyraźnej zgodzie.
 Aktualna bezpieczna migracja bazowa znajduje się w `docs/sql/migrations/20260619_120000_baseline_non_destructive.sql`.
 Aktualna bezpieczna migracja modelu Kontakt -> Umówione spotkanie -> Do realizacji znajduje się w `docs/sql/migrations/20260622_230000_contact_lifecycle_non_destructive.sql`.
+Aktualna bezpieczna migracja dziennika zdarzeń kontaktu znajduje się w `docs/sql/migrations/20260626_120000_contact_events_journal.sql`.
 Nic z tego pliku nie wykonuje się automatycznie.
 
 ## Aktualna mapa bazy danych
@@ -88,7 +89,7 @@ Docelowy widok kontaktu w aplikacji:
 | `contact_date` | `date` | Data kontaktu albo data umówionego spotkania. |
 | `contact_time` | `time` | Czas kontaktu, jeśli jest używany. |
 | `meeting_time` | `time` | Godzina umówionego spotkania. |
-| `contact_quality` | `text` | Jakość kontaktu, historycznie np. `S`, `M`, `L`, `XL`. |
+| `contact_quality` | `text` | Znaczniki jakości kontaktu, np. `favorite,top`. `favorite` oznacza gwiazdkę, a jakość/potencjał może mieć wartości `top`, `strong`, `relation`, `weak`. |
 | `contact_notification` | `timestamptz` | Termin przypomnienia dla kontaktu. |
 | `meeting_started_at` | `timestamptz` | Czas rozpoczęcia spotkania. |
 | `meeting_finished_at` | `timestamptz` | Czas zakończenia spotkania. |
@@ -148,7 +149,7 @@ Jeden wiersz = jedno umówione spotkanie w drugim etapie życia leada.
 | `address` | `text` | Adres spotkania. |
 | `meeting_date` | `date` | Data umówionego spotkania. |
 | `meeting_time` | `time` | Godzina umówionego spotkania. |
-| `quality` | `text` | Jakość spotkania, jeśli agent jej używa. |
+| `quality` | `text` | Pole historyczne. Skala jakości spotkania nie jest aktualnie używana w UX. |
 | `note` | `text` | Uwagi/notatki do spotkania. |
 | `result` | `text` | Wynik spotkania po rozliczeniu. |
 | `result_reason` | `text` | Powód wyniku, jeśli jest potrzebny. |
@@ -208,6 +209,39 @@ Zasada UI:
 | Kafelek kontaktu / lista | Obok nazwy kontaktu pokazujemy tylko kolorowe kropki typów, bez nazw. |
 | Szczegóły kontaktu | Pokazujemy pełne nazwy typów wraz z kolorami. |
 | Edycja kontaktu | Agent może zaznaczyć wiele typów kontaktu. |
+
+### `public.contact_events`
+
+Dziennik zdarzeń kontaktu.
+To ta tabela jest docelową prawdą historyczną dla statystyk.
+
+Jeden wiersz = jedno zdarzenie w życiu kontaktu.
+
+| Kolumna | Typ | Znaczenie |
+| --- | --- | --- |
+| `id` | `uuid` | ID zdarzenia. |
+| `agent_id` | `uuid` | Właściciel zdarzenia. Wskazuje na `auth.users.id`. |
+| `contact_id` | `uuid` | Kontakt, którego dotyczy zdarzenie. |
+| `work_cycle_id` | `uuid` | Cykl pracy, jeśli zdarzenie było przypisane do cyklu. |
+| `event_type` | `text` | Techniczny typ zdarzenia, np. `contact_created`, `meeting_scheduled`, `contract_signed`. |
+| `event_note` | `text` | Krótki opis zdarzenia widoczny dla agenta. |
+| `metadata` | `jsonb` | Dodatkowe dane zdarzenia, np. poprzedni status, nowy status, data spotkania. |
+| `created_at` | `timestamptz` | Data zapisania zdarzenia. |
+
+Przykładowe typy zdarzeń:
+
+| `event_type` | Znaczenie |
+| --- | --- |
+| `contact_created` | Utworzono kontakt. |
+| `contact_updated` | Zmieniono dane kontaktu. |
+| `contact_type_changed` | Zmieniono typ kontaktu. |
+| `contact_status_changed` | Zmieniono status kontaktu. |
+| `meeting_scheduled` | Umówiono spotkanie. |
+| `meeting_rescheduled` | Przełożono spotkanie. |
+| `meeting_not_sold` | Spotkanie niesprzedane. |
+| `meeting_missed` | Spotkanie nieodbyte. |
+| `contract_signed` | Spisano umowę. |
+| `contact_hidden` | Kontakt usunięto z aktywnego widoku, ale nie skasowano z bazy. |
 
 ### `public.clients`
 

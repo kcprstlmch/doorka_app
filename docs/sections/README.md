@@ -4,10 +4,10 @@ Ten folder zawiera dokumenty dla głównych sekcji aplikacji.
 Każdy plik opisuje mechanizmy, funkcje i zachowania jednej sekcji.
 
 ## Pliki
-- `Dashboard.md` - ekran główny, sesja leadowania, szybkie akcje, ostatnie kontakty i tygodniowe podsumowanie.
+- `Dashboard.md` - ekran główny, szybkie akcje, kontakty i tygodniowe podsumowanie.
 - `Contacts.md` - kontakty, statusy kontaktów, formularz dodawania, aktywność i przeniesienie do W realizacji.
 - `In_process.md` - sekcja W realizacji, etapy realizacji, typ klienta, historia etapów i status Spad.
-- `Statistics.md` - statystyki, metryki, zakresy danych, czas leadowania, konwersje i raporty.
+- `Statistics.md` - statystyki, metryki, zakresy danych, konwersje i raporty.
 - `Settings.md` - organizacja ustawień, kategorii i preferencji użytkownika.
 - `Planning.md` - planowanie miesiąca, tygodnia i dnia.
 

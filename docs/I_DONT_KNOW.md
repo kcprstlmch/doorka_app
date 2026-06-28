@@ -8,8 +8,8 @@ Na ten moment cały UX/UI zostaje odłożony.
 UX/UI będzie omawiany później na podstawie inspiracji, na przykład z Pinteresta.
 
 ## Dashboard
-Nie wiadomo jeszcze, jakie trzy informacje agent powinien zobaczyć jako pierwsze po otwarciu aplikacji.
-Aktywny kafelek na Dashboardzie jest szerokim tematem i wymaga osobnej rozmowy.
+Dashboard zaczyna sie od szybkich akcji.
+Nie wiadomo jeszcze, czy pozniej dodamy dodatkowy kontekst dnia ponad statystykami, ale obecnie nie projektujemy aktywnego panelu ze stoperem.
 
 ## Szybka notatka
 Nie wiadomo jeszcze, czym dokładnie będzie Szybka notatka.

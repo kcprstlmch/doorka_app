@@ -34,19 +34,18 @@ SupabaseClient get _supabase => Supabase.instance.client;
 final List<Map<String, dynamic>> _localLeadSessions = [];
 final ValueNotifier<String?> _avatarPathNotifier = ValueNotifier<String?>(null);
 final ValueNotifier<int> _defaultLeadGoalNotifier = ValueNotifier<int>(9);
+final ValueNotifier<int> _leadCycleCountNotifier = ValueNotifier<int>(2);
 final ValueNotifier<int> _authRefreshNotifier = ValueNotifier<int>(0);
 final ValueNotifier<int> _unprocessedMeetingsNotifier = ValueNotifier<int>(0);
 final ValueNotifier<List<ContactStatus>> _customContactStatusesNotifier =
     ValueNotifier<List<ContactStatus>>([]);
 const _avatarPathPreferenceKey = 'doorka.avatar_path';
 const _defaultLeadGoalPreferenceKey = 'doorka.default_lead_goal';
+const _leadCycleCountPreferenceKey = 'doorka.lead_cycle_count';
 const _customContactStatusesPreferenceKey = 'doorka.custom_contact_statuses';
 const _rememberLoginPreferenceKey = 'doorka.remember_login';
 const _rememberedEmailPreferenceKey = 'doorka.remembered_email';
 const _rememberedPasswordPreferenceKey = 'doorka.remembered_password';
-const _leadDayStartedAtPreferenceKey = 'doorka.lead_day_started_at';
-const _leadDayBreakStartedAtPreferenceKey = 'doorka.lead_day_break_started_at';
-const _leadDayBreakSecondsPreferenceKey = 'doorka.lead_day_break_seconds';
 const _manualRefreshTimeout = Duration(seconds: 20);
 
 void _ignoreManualRefreshError(Object error) {}
@@ -533,6 +532,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _avatarPathNotifier.value = null;
     _defaultLeadGoalNotifier.value =
         preferences.getInt(_defaultLeadGoalPreferenceKey) ?? 9;
+    _leadCycleCountNotifier.value =
+        preferences.getInt(_leadCycleCountPreferenceKey) ?? 2;
     await _loadCustomContactStatuses();
     await _refreshUnprocessedMeetingsCount();
   }
@@ -789,8 +790,8 @@ class _BottomNavBar extends StatelessWidget {
       label: 'Umówione',
     ),
     _BottomNavItem(
-      icon: Icons.precision_manufacturing_outlined,
-      selectedIcon: Icons.precision_manufacturing,
+      icon: Icons.add_circle_outline,
+      selectedIcon: Icons.add_circle,
       label: 'W realizacji',
     ),
     _BottomNavItem(
@@ -1063,7 +1064,7 @@ const _defaultContactTypeStatus = ContactStatus(
 const _defaultEditableContactStatuses = [
   ContactStatus(
     'to_call',
-    'Do przedzwonienia',
+    'Do Zadzwonienia',
     Color(0xFF2374AB),
     stage: 'contact',
     icon: Icons.phone_outlined,
@@ -1073,7 +1074,7 @@ const _defaultEditableContactStatuses = [
     'Do podjechania',
     Color(0xFFB7791F),
     stage: 'contact',
-    icon: Icons.home_outlined,
+    icon: Icons.directions_car_outlined,
   ),
   ContactStatus(
     'working',
@@ -1120,6 +1121,7 @@ const _statusPalette = [
 
 const _contactStatusIconChoices = [
   Icons.phone_outlined,
+  Icons.directions_car_outlined,
   Icons.home_outlined,
   Icons.edit_note_outlined,
   Icons.schedule_outlined,
@@ -1148,7 +1150,20 @@ Color _automaticStatusColor(String stage) {
   return _statusPalette[customCount % _statusPalette.length];
 }
 
-const _qualities = ['S', 'M', 'L', 'XL'];
+const _favoriteContactQualityValue = 'favorite';
+const _contactQualityValues = ['top', 'strong', 'relation', 'weak'];
+const _contactQualityLabels = {
+  'top': 'TOP',
+  'strong': 'Mocny',
+  'relation': 'Relacja',
+  'weak': 'Słaby',
+};
+const _contactQualityPriority = {
+  'top': 4,
+  'strong': 3,
+  'relation': 2,
+  'weak': 1,
+};
 
 const _meetingStatuses = {
   'scheduled_meeting',
@@ -1221,10 +1236,66 @@ List<Contact> _contactsFromSupabaseData(Object? data) {
       .toList();
 }
 
+List<ContactEvent> _contactEventsFromSupabaseData(Object? data) {
+  return (data as List)
+      .map((item) => ContactEvent.fromMap(Map<String, dynamic>.from(item)))
+      .toList();
+}
+
+Future<void> _logContactEvent({
+  required Contact contact,
+  required String eventType,
+  required String eventNote,
+  Map<String, dynamic> metadata = const {},
+}) async {
+  final user = _supabase.auth.currentUser;
+  if (user == null || contact.id.isEmpty) return;
+
+  try {
+    await _supabase.from('contact_events').insert({
+      'agent_id': user.id,
+      'contact_id': contact.id,
+      'event_type': eventType,
+      'event_note': eventNote,
+      'metadata': metadata,
+    });
+  } catch (_) {
+    // Dziennik nie moze blokowac pracy agenta, szczegolnie przed wgraniem migracji.
+  }
+}
+
+Future<List<ContactEvent>> _fetchContactEvents(String contactId) async {
+  try {
+    final data = await _supabase
+        .from('contact_events')
+        .select()
+        .eq('contact_id', contactId)
+        .order('created_at', ascending: false);
+    return _contactEventsFromSupabaseData(data);
+  } catch (_) {
+    return const [];
+  }
+}
+
+Future<void> _hideContactFromActiveWork(Contact contact, String note) async {
+  final archivedAt = DateTime.now().toIso8601String();
+  await _supabase
+      .from('contacts')
+      .update({'archived_at': archivedAt})
+      .eq('id', contact.id);
+  await _logContactEvent(
+    contact: contact,
+    eventType: 'contact_hidden',
+    eventNote: note,
+    metadata: {'archived_at': archivedAt},
+  );
+}
+
 Future<List<Contact>> _fetchActiveContacts() async {
   final data = await _supabase
       .from('contacts')
       .select()
+      .isFilter('archived_at', null)
       .isFilter('moved_to_client_at', null);
 
   return _contactsFromSupabaseData(data);
@@ -1242,6 +1313,7 @@ ContactStatus _statusByValue(String value) {
   return [
     ..._contactStatuses,
     ..._customContactStatusesNotifier.value,
+    ..._defaultEditableContactStatuses,
   ].firstWhere(
     (status) => status.value == value,
     orElse: () => _contactStatuses.first,
@@ -1265,6 +1337,16 @@ List<ContactStatus> _statusesForStage(String stage) {
 
 String _stageForContactStatus(String status) {
   return _statusByValue(status).stage;
+}
+
+String? _effectiveContactWorkStatusValue(Contact contact) {
+  final rawStatus = contact.contactStatus?.trim();
+  if (rawStatus != null && rawStatus.isNotEmpty) return rawStatus;
+  if (_stageForContactStatus(contact.status) != 'contact') return null;
+  final hasType =
+      contact.contactType.trim().isNotEmpty ||
+      contact.contactQuality.trim().isNotEmpty;
+  return hasType ? null : 'working';
 }
 
 List<String> _contactTypeValuesFromRaw(String raw) {
@@ -1305,6 +1387,51 @@ List<ContactStatus> _contactTypeStatusesFor(Contact contact) {
 
   if (statuses.isEmpty) return [];
   return statuses.take(3).toList();
+}
+
+bool _isFavoriteContactQuality(String rawQuality) {
+  return rawQuality
+      .split(RegExp(r'[,;/\s]+'))
+      .map((value) => value.trim().toLowerCase())
+      .contains(_favoriteContactQualityValue);
+}
+
+String? _contactPotentialQualityFromRaw(String rawQuality) {
+  for (final value
+      in rawQuality
+          .split(RegExp(r'[,;/\s]+'))
+          .map((value) => value.trim().toLowerCase())) {
+    if (_contactQualityValues.contains(value)) return value;
+  }
+  return null;
+}
+
+String? _contactQualityRaw({
+  required bool isFavorite,
+  required String? potential,
+}) {
+  final values = <String>[
+    if (isFavorite) _favoriteContactQualityValue,
+    if (potential != null && _contactQualityValues.contains(potential))
+      potential,
+  ];
+  return values.isEmpty ? null : values.join(',');
+}
+
+int _compareContactsByFavorite(Contact a, Contact b) {
+  final favoriteA = _isFavoriteContactQuality(a.contactQuality);
+  final favoriteB = _isFavoriteContactQuality(b.contactQuality);
+
+  if (favoriteA != favoriteB) return favoriteA ? -1 : 1;
+
+  final qualityA = _contactPotentialQualityFromRaw(a.contactQuality);
+  final qualityB = _contactPotentialQualityFromRaw(b.contactQuality);
+  final priorityA = qualityA == null ? 0 : _contactQualityPriority[qualityA]!;
+  final priorityB = qualityB == null ? 0 : _contactQualityPriority[qualityB]!;
+  final qualityCompare = priorityB.compareTo(priorityA);
+  if (qualityCompare != 0) return qualityCompare;
+
+  return a.contactName.toLowerCase().compareTo(b.contactName.toLowerCase());
 }
 
 Future<void> _loadCustomContactStatuses() async {
@@ -1438,15 +1565,6 @@ String _timeOnly(TimeOfDay time) {
   return '$hour:$minute';
 }
 
-TimeOfDay _timeOfDayFromText(String value) {
-  final parts = value.split(':');
-  if (parts.length < 2) return const TimeOfDay(hour: 18, minute: 0);
-  return TimeOfDay(
-    hour: int.tryParse(parts[0]) ?? 18,
-    minute: int.tryParse(parts[1]) ?? 0,
-  );
-}
-
 String _shortDate(DateTime date) {
   final day = date.day.toString().padLeft(2, '0');
   final month = date.month.toString().padLeft(2, '0');
@@ -1565,64 +1683,44 @@ class DashboardPage extends StatefulWidget {
 class _DashboardData {
   const _DashboardData({
     required this.contacts,
+    required this.statsContacts,
     required this.clients,
     required this.leadSessions,
   });
 
   final List<Contact> contacts;
+  final List<Contact> statsContacts;
   final List<Client> clients;
   final List<Map<String, dynamic>> leadSessions;
 }
 
-class _DashboardPageState extends State<DashboardPage>
-    with WidgetsBindingObserver {
+class _DashboardPageState extends State<DashboardPage> {
   late Future<_DashboardData> _dashboardFuture;
-  bool _isLeadDayStarted = false;
-  bool _isLeadDayPaused = false;
   bool _isWeeklyTileExpanded = true;
-  int _sessionCollectedContacts = 0;
-  Duration _leadDayElapsed = Duration.zero;
-  Duration _leadDayBreakElapsed = Duration.zero;
-  DateTime? _leadDayStartedAt;
-  DateTime? _leadDayBreakStartedAt;
-  Timer? _leadDayTimer;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _dashboardFuture = _fetchDashboardData();
-    _restoreLeadDayTimer();
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _leadDayTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _refreshLeadDayElapsed();
-    }
   }
 
   Future<_DashboardData> _fetchDashboardData() async {
     final contacts = await _fetchActiveContacts();
+    final statsContactsData = await _supabase.from('contacts').select();
     final clientsData = await _supabase
         .from('clients')
         .select()
         .isFilter('archived_at', null);
     final leadSessions = await _fetchLeadSessionsForDashboard();
 
+    final statsContacts = _contactsFromSupabaseData(statsContactsData);
     final clients = clientsData
         .map((item) => Client.fromMap(Map<String, dynamic>.from(item)))
         .toList();
 
     return _DashboardData(
       contacts: contacts,
+      statsContacts: statsContacts,
       clients: clients,
       leadSessions: leadSessions
           .map((item) => Map<String, dynamic>.from(item))
@@ -1665,6 +1763,13 @@ class _DashboardPageState extends State<DashboardPage>
         _dashboardFuture = Future.value(
           _DashboardData(
             contacts: nextContacts,
+            statsContacts: [
+              for (final contact in data.statsContacts)
+                if (contact.id == updatedContact.id)
+                  updatedContact
+                else
+                  contact,
+            ],
             clients: data.clients,
             leadSessions: data.leadSessions,
           ),
@@ -1673,210 +1778,15 @@ class _DashboardPageState extends State<DashboardPage>
     });
   }
 
-  Future<void> _restoreLeadDayTimer() async {
-    final preferences = await SharedPreferences.getInstance();
-    final startedAtText = preferences.getString(_leadDayStartedAtPreferenceKey);
-    final breakStartedAtText = preferences.getString(
-      _leadDayBreakStartedAtPreferenceKey,
-    );
-    final breakSeconds =
-        preferences.getInt(_leadDayBreakSecondsPreferenceKey) ?? 0;
-    final startedAt = DateTime.tryParse(startedAtText ?? '');
-    final breakStartedAt = DateTime.tryParse(breakStartedAtText ?? '');
-    if (!mounted || startedAt == null) return;
-
-    final baseBreakElapsed = Duration(seconds: breakSeconds);
-    final currentBreakElapsed = breakStartedAt == null
-        ? Duration.zero
-        : DateTime.now().difference(breakStartedAt);
-    final totalBreakElapsed = baseBreakElapsed + currentBreakElapsed;
-
-    setState(() {
-      _isLeadDayStarted = true;
-      _isLeadDayPaused = breakStartedAt != null;
-      _leadDayStartedAt = startedAt;
-      _leadDayBreakStartedAt = breakStartedAt;
-      _leadDayBreakElapsed = totalBreakElapsed;
-      _leadDayElapsed =
-          DateTime.now().difference(startedAt) - totalBreakElapsed;
-    });
-    _startLeadDayTicker();
-  }
-
-  void _refreshLeadDayElapsed() {
-    final startedAt = _leadDayStartedAt;
-    if (!mounted || !_isLeadDayStarted || startedAt == null) {
-      return;
-    }
-
-    final now = DateTime.now();
-    final currentBreakElapsed =
-        _isLeadDayPaused && _leadDayBreakStartedAt != null
-        ? now.difference(_leadDayBreakStartedAt!)
-        : Duration.zero;
-    final totalBreakElapsed = _leadDayBreakElapsed + currentBreakElapsed;
-    final workElapsed = now.difference(startedAt) - totalBreakElapsed;
-
-    setState(() {
-      if (_isLeadDayPaused) {
-        _leadDayElapsed = workElapsed.isNegative ? Duration.zero : workElapsed;
-      } else {
-        _leadDayElapsed = workElapsed.isNegative ? Duration.zero : workElapsed;
-      }
-    });
-  }
-
-  void _startLeadDayTicker() {
-    _leadDayTimer?.cancel();
-    _leadDayTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _refreshLeadDayElapsed();
-    });
-  }
-
-  Future<void> _startLeadDay() async {
-    _leadDayTimer?.cancel();
-    final startedAt = DateTime.now();
-    final preferences = await SharedPreferences.getInstance();
-    await preferences.setString(
-      _leadDayStartedAtPreferenceKey,
-      startedAt.toIso8601String(),
-    );
-    await preferences.remove(_leadDayBreakStartedAtPreferenceKey);
-    await preferences.setInt(_leadDayBreakSecondsPreferenceKey, 0);
-    if (!mounted) return;
-
-    setState(() {
-      _isLeadDayStarted = true;
-      _isLeadDayPaused = false;
-      _leadDayStartedAt = startedAt;
-      _leadDayBreakStartedAt = null;
-      _leadDayBreakElapsed = Duration.zero;
-      _leadDayElapsed = Duration.zero;
-      _sessionCollectedContacts = 0;
-    });
-    _startLeadDayTicker();
-  }
-
-  Future<void> _toggleLeadDayBreak() async {
-    if (!_isLeadDayStarted) return;
-
-    final preferences = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-
-    if (_isLeadDayPaused) {
-      final breakStartedAt = _leadDayBreakStartedAt;
-      final breakDuration = breakStartedAt == null
-          ? Duration.zero
-          : now.difference(breakStartedAt);
-      final totalBreakElapsed = _leadDayBreakElapsed + breakDuration;
-
-      await preferences.setInt(
-        _leadDayBreakSecondsPreferenceKey,
-        totalBreakElapsed.inSeconds,
-      );
-      await preferences.remove(_leadDayBreakStartedAtPreferenceKey);
-
-      if (!mounted) return;
-      setState(() {
-        _isLeadDayPaused = false;
-        _leadDayBreakStartedAt = null;
-        _leadDayBreakElapsed = totalBreakElapsed;
-      });
-      _refreshLeadDayElapsed();
-      return;
-    }
-
-    await preferences.setString(
-      _leadDayBreakStartedAtPreferenceKey,
-      now.toIso8601String(),
-    );
-    if (!mounted) return;
-    setState(() {
-      _isLeadDayPaused = true;
-      _leadDayBreakStartedAt = now;
-    });
-    _refreshLeadDayElapsed();
-  }
-
-  Future<void> _finishLeadDay() async {
-    if (!_isLeadDayStarted) return;
-
-    final preferences = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-    final breakStartedAt = _leadDayBreakStartedAt;
-    final finalBreakElapsed =
-        _leadDayBreakElapsed +
-        (_isLeadDayPaused && breakStartedAt != null
-            ? now.difference(breakStartedAt)
-            : Duration.zero);
-    final workSeconds = _leadDayElapsed.inSeconds;
-
-    final session = {
-      'agent_id': _supabase.auth.currentUser?.id,
-      'session_date': _dateOnly(now),
-      'scheduled_meetings_count': 0,
-      'collected_contacts_count': _sessionCollectedContacts,
-      'work_seconds': workSeconds,
-      'break_seconds': finalBreakElapsed.inSeconds,
-      'created_at': now.toIso8601String(),
-    };
-
-    try {
-      await _supabase.from('lead_sessions').insert(session);
-    } catch (_) {
-      _localLeadSessions.add(session);
-    }
-
-    await preferences.remove(_leadDayStartedAtPreferenceKey);
-    await preferences.remove(_leadDayBreakStartedAtPreferenceKey);
-    await preferences.remove(_leadDayBreakSecondsPreferenceKey);
-
-    _leadDayTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _isLeadDayStarted = false;
-      _isLeadDayPaused = false;
-      _leadDayStartedAt = null;
-      _leadDayBreakStartedAt = null;
-      _leadDayElapsed = Duration.zero;
-      _leadDayBreakElapsed = Duration.zero;
-      _sessionCollectedContacts = 0;
-      _dashboardFuture = _fetchDashboardData();
-    });
-  }
-
   Future<void> _openLeadContactForm(String status) async {
     final saved = await showAddContactSheet(context, initialStatus: status);
     if (!mounted || saved != true) return;
 
-    setState(() {
-      _dashboardFuture = _fetchDashboardData();
-      if (status == 'contact') {
-        _sessionCollectedContacts++;
-      }
-    });
+    setState(() => _dashboardFuture = _fetchDashboardData());
   }
 
   Future<void> _deleteDashboardContact(Contact contact) async {
-    await _supabase.from('contacts').delete().eq('id', contact.id);
-    _reload();
-  }
-
-  Future<void> _editDashboardMeetingTime(Contact contact) async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: _timeOfDayFromText(contact.contactTime),
-    );
-    if (picked == null) return;
-
-    await _supabase
-        .from('contacts')
-        .update({
-          'contact_time': _timeOnly(picked),
-          'meeting_time': _timeOnly(picked),
-        })
-        .eq('id', contact.id);
-
+    await _hideContactFromActiveWork(contact, 'Kontakt usunięty z dashboardu.');
     _reload();
   }
 
@@ -1901,13 +1811,11 @@ class _DashboardPageState extends State<DashboardPage>
 
           final data =
               snapshot.data ??
-              const _DashboardData(contacts: [], clients: [], leadSessions: []);
-          final scheduledMeetings =
-              data.contacts.where((contact) {
-                return _isCurrentOrUpcomingMeeting(contact);
-              }).toList()..sort(
-                (a, b) =>
-                    _compareContactsByDateAndTime(a, b, newestFirst: false),
+              const _DashboardData(
+                contacts: [],
+                statsContacts: [],
+                clients: [],
+                leadSessions: [],
               );
           final collectedContacts = data.contacts
               .where((contact) => !_isMeetingStatus(contact.status))
@@ -1926,51 +1834,41 @@ class _DashboardPageState extends State<DashboardPage>
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(bottom: 96),
               children: [
-                ValueListenableBuilder<int>(
-                  valueListenable: _defaultLeadGoalNotifier,
-                  builder: (context, dailyGoal, _) {
-                    return _ActiveDashboardTile(
-                      today: DateTime.now(),
-                      dailyGoal: dailyGoal,
-                      isStarted: _isLeadDayStarted,
-                      isPaused: _isLeadDayPaused,
-                      elapsed: _leadDayElapsed,
-                      currentMeetings: scheduledMeetings.length,
-                      currentContacts: _sessionCollectedContacts,
-                      onStart: _startLeadDay,
-                      onToggleBreak: _toggleLeadDayBreak,
-                      onFinish: _finishLeadDay,
-                      onScheduleMeeting: () =>
-                          _openLeadContactForm('scheduled_meeting'),
-                      onAddLead: () => _openLeadContactForm('contact'),
-                    );
-                  },
-                ),
-                const SizedBox(height: 16),
                 _DashboardBodyPadding(
-                  child: _DashboardList(
-                    title: 'Umówione spotkania',
-                    headerTrailing:
-                        scheduledMeetings.isEmpty ||
-                            scheduledMeetings.first.contactDate == null
-                        ? null
-                        : '${_shortDate(scheduledMeetings.first.contactDate!)} | ${_weekdayNameFull(scheduledMeetings.first.contactDate!)}',
-                    emptyText: 'Brak umówionych spotkań.',
-                    contacts: scheduledMeetings,
-                    leadingIcon: Icons.handshake_outlined,
-                    onDelete: _deleteDashboardContact,
-                    onContactChanged: _updateDashboardContact,
-                    onEditMeetingTime: _editDashboardMeetingTime,
+                  child: _DashboardQuickActionsTile(
+                    onScheduleMeeting: () =>
+                        _openLeadContactForm('scheduled_meeting'),
+                    onAddLead: () => _openLeadContactForm('contact'),
+                    onAddWorkingContact: () => _openLeadContactForm('contact'),
+                    onAddCustom: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ContactStatusesPage(),
+                        ),
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(height: 16),
                 _DashboardBodyPadding(
-                  child: _WeeklyDashboardTile(
-                    stats: weeklyStats,
-                    isExpanded: _isWeeklyTileExpanded,
-                    onToggleExpanded: () => setState(
-                      () => _isWeeklyTileExpanded = !_isWeeklyTileExpanded,
-                    ),
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _defaultLeadGoalNotifier,
+                    builder: (context, cycleGoal, _) {
+                      return ValueListenableBuilder<int>(
+                        valueListenable: _leadCycleCountNotifier,
+                        builder: (context, cycleCount, _) {
+                          return _WeeklyDashboardTile(
+                            stats: weeklyStats,
+                            scheduledWeeklyGoal: cycleGoal * cycleCount,
+                            isExpanded: _isWeeklyTileExpanded,
+                            onToggleExpanded: () => setState(
+                              () => _isWeeklyTileExpanded =
+                                  !_isWeeklyTileExpanded,
+                            ),
+                          );
+                        },
+                      );
+                    },
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -1998,24 +1896,16 @@ class _DashboardPageState extends State<DashboardPage>
     final previousWeekStart = thisWeekStart.subtract(const Duration(days: 7));
     final nextWeekStart = thisWeekStart.add(const Duration(days: 7));
 
-    final thisMeetings = data.contacts
-        .where(
-          (contact) => _isDashboardMeetingInPeriod(
-            contact,
-            thisWeekStart,
-            nextWeekStart,
-          ),
-        )
-        .length;
-    final previousMeetings = data.contacts
-        .where(
-          (contact) => _isDashboardMeetingInPeriod(
-            contact,
-            previousWeekStart,
-            thisWeekStart,
-          ),
-        )
-        .length;
+    final thisScheduledMeetings = _scheduledMeetingItemsInPeriod(
+      data,
+      thisWeekStart,
+      nextWeekStart,
+    );
+    final previousScheduledMeetings = _scheduledMeetingItemsInPeriod(
+      data,
+      previousWeekStart,
+      thisWeekStart,
+    );
 
     final thisClients = data.clients
         .where(
@@ -2025,7 +1915,7 @@ class _DashboardPageState extends State<DashboardPage>
             nextWeekStart,
           ),
         )
-        .length;
+        .toList();
     final previousClients = data.clients
         .where(
           (client) => _isDateInPeriod(
@@ -2034,65 +1924,188 @@ class _DashboardPageState extends State<DashboardPage>
             thisWeekStart,
           ),
         )
-        .length;
+        .toList();
 
-    final thisLeadSeconds = _leadSecondsInPeriod(
-      data.leadSessions,
+    final thisCompletedMeetings = _completedMeetingItemsInPeriod(
+      data,
       thisWeekStart,
       nextWeekStart,
     );
-    final previousLeadSeconds = _leadSecondsInPeriod(
-      data.leadSessions,
+    final previousCompletedMeetings = _completedMeetingItemsInPeriod(
+      data,
       previousWeekStart,
       thisWeekStart,
     );
 
     return _WeekDashboardStats(
-      processedContracts: _WeekMetric(
-        label: 'Umowy',
-        value: thisClients,
-        previousValue: previousClients,
+      signedContracts: _WeekMetric(
+        label: 'Spisane umowy',
+        value: thisClients.length,
+        previousValue: previousClients.length,
+        items: _clientMetricItems(thisClients),
+        previousItems: _clientMetricItems(previousClients),
       ),
-      meetings: _WeekMetric(
-        label: 'Spotkania',
-        value: thisMeetings,
-        previousValue: previousMeetings,
+      completedMeetings: _WeekMetric(
+        label: 'Odbyte spotkania',
+        value: thisCompletedMeetings.length,
+        previousValue: previousCompletedMeetings.length,
+        items: thisCompletedMeetings,
+        previousItems: previousCompletedMeetings,
       ),
-      fieldTime: _WeekMetric(
-        label: 'Czas w terenie',
-        value: thisLeadSeconds,
-        previousValue: previousLeadSeconds,
-        formatter: (seconds) => _formatDuration(Duration(seconds: seconds)),
+      scheduledMeetings: _WeekMetric(
+        label: 'Umówione spotkania',
+        value: thisScheduledMeetings.length,
+        previousValue: previousScheduledMeetings.length,
+        items: thisScheduledMeetings,
+        previousItems: previousScheduledMeetings,
       ),
     );
   }
 
-  int _leadSecondsInPeriod(
-    List<Map<String, dynamic>> sessions,
+  List<_WeekMetricItem> _scheduledMeetingItemsInPeriod(
+    _DashboardData data,
     DateTime start,
     DateTime end,
   ) {
-    return sessions
-        .where((session) {
-          final date = DateTime.tryParse(
-            session['session_date']?.toString() ?? '',
-          );
-          return _isDateInPeriod(date, start, end);
-        })
-        .fold<int>(
-          0,
-          (sum, session) =>
-              sum + (session['work_seconds'] as num? ?? 0).toInt(),
-        );
+    final meetingContacts = data.statsContacts
+        .where(
+          (contact) =>
+              _isScheduledMeetingRecord(contact) &&
+              _isDateInPeriod(contact.contactDate, start, end),
+        )
+        .toList();
+    final meetingContactIds = meetingContacts
+        .map((contact) => contact.id)
+        .toSet();
+    final signedMeetingClients = data.clients
+        .where(
+          (client) =>
+              !meetingContactIds.contains(client.sourceContactId) &&
+              _isDateInPeriod(client.contractSignedAt, start, end),
+        )
+        .toList();
+
+    return [
+      ..._contactMetricItems(meetingContacts),
+      ..._clientMetricItems(signedMeetingClients),
+    ];
   }
 
-  bool _isDashboardMeetingInPeriod(
-    Contact contact,
+  List<_WeekMetricItem> _completedMeetingItemsInPeriod(
+    _DashboardData data,
     DateTime start,
     DateTime end,
   ) {
+    final completedContacts = data.statsContacts
+        .where(
+          (contact) =>
+              (contact.status == 'meeting_done' ||
+                  contact.status == 'signed_contract' ||
+                  _isScheduledMeetingInPast(contact)) &&
+              _isDateInPeriod(contact.contactDate, start, end),
+        )
+        .toList();
+    final completedContactIds = completedContacts
+        .map((contact) => contact.id)
+        .toSet();
+    final signedClients = data.clients
+        .where(
+          (client) =>
+              _isDateInPeriod(client.contractSignedAt, start, end) &&
+              (client.sourceContactId.isEmpty ||
+                  !completedContactIds.contains(client.sourceContactId)),
+        )
+        .toList();
+
+    return [
+      ..._contactMetricItems(completedContacts),
+      ..._clientMetricItems(signedClients),
+    ];
+  }
+
+  List<_WeekMetricItem> _contactMetricItems(List<Contact> contacts) {
+    return contacts
+        .map(
+          (contact) => _WeekMetricItem(
+            title: contact.contactName.isEmpty
+                ? 'Bez nazwy'
+                : contact.contactName,
+            address: contact.address.trim(),
+            note: _isUnresolvedPastMeeting(contact)
+                ? [
+                    'Nierozliczone spotkanie',
+                    if (contact.note.trim().isNotEmpty) contact.note.trim(),
+                  ].join(' | ')
+                : contact.note.trim(),
+            trailing: contact.contactDate == null
+                ? ''
+                : contact.contactTime.length >= 5
+                ? '${_shortDate(contact.contactDate!)} ${contact.contactTime.substring(0, 5)}'
+                : _shortDate(contact.contactDate!),
+            icon: _isUnresolvedPastMeeting(contact)
+                ? Icons.event_busy_outlined
+                : Icons.event_available_outlined,
+            color: _isUnresolvedPastMeeting(contact)
+                ? appDanger
+                : _statusByValue(contact.status).color,
+          ),
+        )
+        .toList();
+  }
+
+  List<_WeekMetricItem> _clientMetricItems(List<Client> clients) {
+    return clients
+        .map(
+          (client) => _WeekMetricItem(
+            title: client.clientName.isEmpty ? 'Bez nazwy' : client.clientName,
+            address: client.installationAddress.trim(),
+            note: _clientStatusStyle(client.status).label,
+            trailing: client.contractSignedAt == null
+                ? ''
+                : _shortDate(client.contractSignedAt!),
+            icon: Icons.assignment_turned_in_outlined,
+            color: _clientStatusStyle(client.status).color,
+          ),
+        )
+        .toList();
+  }
+
+  bool _isUnresolvedPastMeeting(Contact contact) {
     return contact.status == 'scheduled_meeting' &&
-        _isDateInPeriod(contact.contactDate, start, end);
+        _isScheduledMeetingInPast(contact);
+  }
+
+  bool _isScheduledMeetingRecord(Contact contact) {
+    if (contact.contactDate == null) return false;
+    if (_isMeetingStatus(contact.status)) return true;
+    return contact.contactTime.trim().isNotEmpty ||
+        contact.contactQuality.trim().isNotEmpty;
+  }
+
+  bool _isScheduledMeetingInPast(Contact contact) {
+    if (!_isScheduledMeetingRecord(contact) ||
+        contact.status == 'signed_contract') {
+      return false;
+    }
+
+    final date = contact.contactDate;
+    if (date == null) return false;
+    final time = _timePartsFromText(contact.contactTime);
+    final scheduledAt = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.$1,
+      time.$2,
+    );
+
+    return scheduledAt.isBefore(DateTime.now());
+  }
+
+  (int, int) _timePartsFromText(String value) {
+    final parts = value.split(':');
+    if (parts.length < 2) return (23, 59);
+    return (int.tryParse(parts[0]) ?? 23, int.tryParse(parts[1]) ?? 59);
   }
 
   bool _isDateInPeriod(DateTime? date, DateTime start, DateTime end) {
@@ -2104,137 +2117,6 @@ class _DashboardPageState extends State<DashboardPage>
   DateTime _weekStart(DateTime date) {
     final day = DateTime(date.year, date.month, date.day);
     return day.subtract(Duration(days: day.weekday - 1));
-  }
-}
-
-class _ActiveDashboardTile extends StatelessWidget {
-  const _ActiveDashboardTile({
-    required this.today,
-    required this.dailyGoal,
-    required this.isStarted,
-    required this.isPaused,
-    required this.elapsed,
-    required this.currentMeetings,
-    required this.currentContacts,
-    required this.onStart,
-    required this.onToggleBreak,
-    required this.onFinish,
-    required this.onScheduleMeeting,
-    required this.onAddLead,
-  });
-
-  final DateTime today;
-  final int? dailyGoal;
-  final bool isStarted;
-  final bool isPaused;
-  final Duration elapsed;
-  final int currentMeetings;
-  final int currentContacts;
-  final VoidCallback onStart;
-  final VoidCallback onToggleBreak;
-  final VoidCallback onFinish;
-  final VoidCallback onScheduleMeeting;
-  final VoidCallback onAddLead;
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: Image.asset(
-              'assets/images/active-lead-session-bg.webp',
-              fit: BoxFit.cover,
-              alignment: Alignment.topCenter,
-              errorBuilder: (context, error, stackTrace) {
-                return const SizedBox.expand();
-              },
-            ),
-          ),
-          Positioned.fill(
-            child: Container(color: appWorkDark.withValues(alpha: 0.70)),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 30),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                width: 10,
-                                height: 10,
-                                decoration: const BoxDecoration(
-                                  color: appSuccess,
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  '${_shortDate(today)} | ${_weekdayNameFull(today)}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: appSurfaceSoft,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            'Leadowanie',
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(
-                                  color: appSurface,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            [
-                              'Umówione: $currentMeetings/$dailyGoal',
-                              'Kontakty: $currentContacts',
-                              _formatDuration(elapsed),
-                            ].join(' | '),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: appWorkText,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    _LeadTimerControls(isStarted: isStarted, onStart: onStart),
-                    if (isStarted)
-                      _ActiveLeadButtons(
-                        isPaused: isPaused,
-                        onToggleBreak: onToggleBreak,
-                        onFinish: onFinish,
-                        onScheduleMeeting: onScheduleMeeting,
-                        onAddLead: onAddLead,
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -2252,59 +2134,79 @@ class _DashboardBodyPadding extends StatelessWidget {
   }
 }
 
-class _ActiveLeadButtons extends StatelessWidget {
-  const _ActiveLeadButtons({
-    required this.isPaused,
-    required this.onToggleBreak,
-    required this.onFinish,
+class _DashboardQuickActionsTile extends StatelessWidget {
+  const _DashboardQuickActionsTile({
     required this.onScheduleMeeting,
     required this.onAddLead,
+    required this.onAddWorkingContact,
+    required this.onAddCustom,
   });
 
-  final bool isPaused;
-  final VoidCallback onToggleBreak;
-  final VoidCallback onFinish;
   final VoidCallback onScheduleMeeting;
   final VoidCallback onAddLead;
+  final VoidCallback onAddWorkingContact;
+  final VoidCallback onAddCustom;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _ActiveLeadButton(
-          label: 'Umów spotkanie',
-          icon: Icons.event_available_outlined,
-          onPressed: onScheduleMeeting,
-          filled: true,
-        ),
-        const SizedBox(height: 6),
-        _ActiveLeadButton(
-          label: 'Dodaj kontakt',
-          icon: Icons.person_add_alt_1_outlined,
-          onPressed: onAddLead,
-        ),
-        const SizedBox(height: 6),
-        _ActiveLeadButton(
-          label: isPaused ? 'Wznów' : 'Przerwa',
-          icon: isPaused
-              ? Icons.play_arrow_rounded
-              : Icons.pause_circle_outline_rounded,
-          onPressed: onToggleBreak,
-        ),
-        const SizedBox(height: 6),
-        _ActiveLeadButton(
-          label: 'Koniec',
-          icon: Icons.stop_circle_outlined,
-          onPressed: onFinish,
-        ),
-      ],
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: appSurface,
+        border: Border.all(color: appBorderStrong),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _DashboardQuickActionButton(
+                  label: 'Umów spotkanie',
+                  icon: Icons.event_available_outlined,
+                  onPressed: onScheduleMeeting,
+                  filled: true,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _DashboardQuickActionButton(
+                  label: 'Dodaj kontakt',
+                  icon: Icons.person_add_alt_1_outlined,
+                  onPressed: onAddLead,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: _DashboardQuickActionButton(
+                  label: 'Kontakt roboczy',
+                  icon: Icons.edit_note_outlined,
+                  onPressed: onAddWorkingContact,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _DashboardQuickActionButton(
+                  label: 'Dodaj własne',
+                  icon: Icons.add_circle_outline,
+                  onPressed: onAddCustom,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _ActiveLeadButton extends StatelessWidget {
-  const _ActiveLeadButton({
+class _DashboardQuickActionButton extends StatelessWidget {
+  const _DashboardQuickActionButton({
     required this.label,
     required this.icon,
     required this.onPressed,
@@ -2321,29 +2223,27 @@ class _ActiveLeadButton extends StatelessWidget {
     final backgroundColor = filled ? appSuccess : appSurface;
     final foregroundColor = filled ? appSurface : appTextPrimary;
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 92, maxWidth: 118),
-      child: FilledButton(
-        style: FilledButton.styleFrom(
-          backgroundColor: backgroundColor,
-          foregroundColor: foregroundColor,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        ),
-        onPressed: onPressed,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18, color: foregroundColor),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
+    return FilledButton(
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(44),
+        backgroundColor: backgroundColor,
+        foregroundColor: foregroundColor,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+      onPressed: onPressed,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: foregroundColor),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700),
+          ),
+        ],
       ),
     );
   }
@@ -2356,96 +2256,16 @@ String _formatDuration(Duration duration) {
   return '$hours:$minutes:$seconds';
 }
 
-class _LeadTimerControls extends StatelessWidget {
-  const _LeadTimerControls({required this.isStarted, required this.onStart});
-
-  final bool isStarted;
-  final VoidCallback onStart;
-
-  @override
-  Widget build(BuildContext context) {
-    if (isStarted) return const SizedBox.shrink();
-
-    return _LeadControlButton(
-      label: 'Start',
-      icon: Icons.play_arrow_rounded,
-      onPressed: onStart,
-      large: true,
-    );
-  }
-}
-
-class _LeadControlButton extends StatelessWidget {
-  const _LeadControlButton({
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-    this.large = false,
-  });
-
-  final String label;
-  final IconData icon;
-  final VoidCallback onPressed;
-  final bool large;
-
-  @override
-  Widget build(BuildContext context) {
-    final isStart = label == 'Start';
-    final size = large ? (isStart ? 70.0 : 82.0) : 74.0;
-    final backgroundColor = isStart ? appSuccess : appSurface;
-    final foregroundColor = isStart ? appSurface : appTextPrimary;
-
-    return InkWell(
-      borderRadius: BorderRadius.circular(18),
-      onTap: onPressed,
-      child: Container(
-        width: size,
-        height: large ? (isStart ? 70 : 82) : 44,
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(isStart ? 999 : 18),
-          boxShadow: [
-            BoxShadow(
-              color: backgroundColor.withValues(alpha: 0.24),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: foregroundColor, size: large ? 30 : 20),
-            SizedBox(height: large ? 2 : 0),
-            Text(
-              label,
-              style: TextStyle(
-                color: foregroundColor,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _WeekDashboardStats {
   const _WeekDashboardStats({
-    required this.processedContracts,
-    required this.meetings,
-    required this.fieldTime,
+    required this.signedContracts,
+    required this.completedMeetings,
+    required this.scheduledMeetings,
   });
 
-  final _WeekMetric processedContracts;
-  final _WeekMetric meetings;
-  final _WeekMetric fieldTime;
-
-  int get total => processedContracts.value + meetings.value;
-  int get previousTotal =>
-      processedContracts.previousValue + meetings.previousValue;
+  final _WeekMetric signedContracts;
+  final _WeekMetric completedMeetings;
+  final _WeekMetric scheduledMeetings;
 }
 
 class _WeekMetric {
@@ -2453,27 +2273,49 @@ class _WeekMetric {
     required this.label,
     required this.value,
     required this.previousValue,
-    this.formatter,
+    required this.items,
+    required this.previousItems,
   });
 
   final String label;
   final int value;
   final int previousValue;
-  final String Function(int value)? formatter;
+  final List<_WeekMetricItem> items;
+  final List<_WeekMetricItem> previousItems;
 
   int get difference => value - previousValue;
-  String get displayValue =>
-      formatter == null ? value.toString() : formatter!(value);
+  String get displayValue => value.toString();
+  String get previousDisplayValue => previousValue.toString();
+}
+
+class _WeekMetricItem {
+  const _WeekMetricItem({
+    required this.title,
+    required this.address,
+    required this.note,
+    required this.trailing,
+    required this.icon,
+    required this.color,
+  });
+
+  final String title;
+  final String address;
+  final String note;
+  final String trailing;
+  final IconData icon;
+  final Color color;
 }
 
 class _WeeklyDashboardTile extends StatelessWidget {
   const _WeeklyDashboardTile({
     required this.stats,
+    required this.scheduledWeeklyGoal,
     required this.isExpanded,
     required this.onToggleExpanded,
   });
 
   final _WeekDashboardStats stats;
+  final int scheduledWeeklyGoal;
   final bool isExpanded;
   final VoidCallback onToggleExpanded;
 
@@ -2491,30 +2333,55 @@ class _WeeklyDashboardTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            stats.processedContracts.value.toString(),
-            style: Theme.of(
-              context,
-            ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
-          ),
-          const SizedBox(height: 2),
-          _WeekComparisonText(
-            currentValue: stats.processedContracts.value,
-            previousValue: stats.processedContracts.previousValue,
-            prefix: 'Umowy przeprocesowane',
-          ),
-          const SizedBox(height: 12),
+          const _WeekSectionLabel(label: 'Ten tydzień'),
+          const SizedBox(height: 8),
           IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: _WeekMetricBox(metric: stats.processedContracts),
+                  child: _WeekMetricBox(
+                    label: stats.signedContracts.label,
+                    value: stats.signedContracts.displayValue,
+                    delta: stats.signedContracts.difference,
+                    onTap: () => _openWeekMetricDetails(
+                      context,
+                      title: stats.signedContracts.label,
+                      periodLabel: 'Ten tydzień',
+                      items: stats.signedContracts.items,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 6),
-                Expanded(child: _WeekMetricBox(metric: stats.meetings)),
+                Expanded(
+                  child: _WeekMetricBox(
+                    label: stats.completedMeetings.label,
+                    value: stats.completedMeetings.displayValue,
+                    delta: stats.completedMeetings.difference,
+                    onTap: () => _openWeekMetricDetails(
+                      context,
+                      title: stats.completedMeetings.label,
+                      periodLabel: 'Ten tydzień',
+                      items: stats.completedMeetings.items,
+                    ),
+                  ),
+                ),
                 const SizedBox(width: 6),
-                Expanded(child: _WeekMetricBox(metric: stats.fieldTime)),
+                Expanded(
+                  child: _WeekMetricBox(
+                    label: stats.scheduledMeetings.label,
+                    value: stats.scheduledMeetings.displayValue,
+                    goal: scheduledWeeklyGoal,
+                    delta: stats.scheduledMeetings.difference,
+                    onTap: () => _openWeekMetricDetails(
+                      context,
+                      title: stats.scheduledMeetings.label,
+                      periodLabel: 'Ten tydzień',
+                      goal: scheduledWeeklyGoal,
+                      items: stats.scheduledMeetings.items,
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -2525,116 +2392,395 @@ class _WeeklyDashboardTile extends StatelessWidget {
 }
 
 class _WeekMetricBox extends StatelessWidget {
-  const _WeekMetricBox({required this.metric});
+  const _WeekMetricBox({
+    required this.label,
+    required this.value,
+    this.goal,
+    this.delta,
+    this.onTap,
+  });
 
-  final _WeekMetric metric;
+  final String label;
+  final String value;
+  final int? goal;
+  final int? delta;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: appSurfaceSoft,
+      borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: appBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: goal == null
+                          ? Text(
+                              value,
+                              maxLines: 1,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.baseline,
+                              textBaseline: TextBaseline.alphabetic,
+                              children: [
+                                Text(
+                                  value,
+                                  maxLines: 1,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const Text(
+                                  '/',
+                                  maxLines: 1,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  goal.toString(),
+                                  maxLines: 1,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                  if (delta != null) ...[
+                    const SizedBox(width: 4),
+                    _WeekDeltaBadge(delta: delta!),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: appTextSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  height: 1.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+void _openWeekMetricDetails(
+  BuildContext context, {
+  required String title,
+  required String periodLabel,
+  required List<_WeekMetricItem> items,
+  int? goal,
+}) {
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => _WeekMetricDetailsPage(
+        title: title,
+        periodLabel: periodLabel,
+        items: items,
+        goal: goal,
+      ),
+    ),
+  );
+}
+
+class _WeekMetricDetailsPage extends StatelessWidget {
+  const _WeekMetricDetailsPage({
+    required this.title,
+    required this.periodLabel,
+    required this.items,
+    this.goal,
+  });
+
+  final String title;
+  final String periodLabel;
+  final List<_WeekMetricItem> items;
+  final int? goal;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: appBackground,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 16, 8),
+              child: Row(
+                children: [
+                  IconButton(
+                    tooltip: 'Wróć',
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.arrow_back),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: appTextPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        Text(
+                          '$periodLabel | ${items.length}',
+                          style: const TextStyle(
+                            color: appTextSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (goal != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          '${items.length}',
+                          style: const TextStyle(
+                            color: appTextPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const Text(
+                          '/',
+                          style: TextStyle(
+                            color: appTextPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          goal.toString(),
+                          style: const TextStyle(
+                            color: appTextPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: items.isEmpty
+                  ? const Center(
+                      child: _EmptyState(
+                        icon: Icons.query_stats_outlined,
+                        text: 'Brak pozycji w tej statystyce.',
+                        detail: 'Lista pojawi się, gdy będą dane.',
+                      ),
+                    )
+                  : ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 24),
+                      itemCount: items.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) =>
+                          _WeekMetricDetailsTile(item: items[index]),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _WeekMetricDetailsTile extends StatelessWidget {
+  const _WeekMetricDetailsTile({required this.item});
+
+  final _WeekMetricItem item;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: appSurfaceSoft,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: appBorder),
+        border: Border.all(color: appBorderStrong),
       ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _WeekChangeBadge(
-            currentValue: metric.value,
-            previousValue: metric.previousValue,
+          Container(
+            width: 28,
+            height: 28,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: item.color.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(item.icon, color: item.color, size: 16),
           ),
-          const SizedBox(height: 4),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              metric.displayValue,
-              maxLines: 1,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        item.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: appTextPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    if (item.address.trim().isNotEmpty) ...[
+                      const SizedBox(width: 7),
+                      Container(width: 1, height: 12, color: appBorderStrong),
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          item.address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: appTextSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                if (item.note.trim().isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    item.note,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: appTextSecondary,
+                      fontSize: 11,
+                      height: 1.15,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-
-          Text(
-            metric.label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: appTextSecondary,
-              fontSize: 10,
-              fontWeight: FontWeight.w600,
-              height: 1.1,
+          if (item.trailing.trim().isNotEmpty) ...[
+            const SizedBox(width: 8),
+            Text(
+              item.trailing,
+              style: const TextStyle(
+                color: appTextSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-          ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _WeekComparisonText extends StatelessWidget {
-  const _WeekComparisonText({
-    required this.currentValue,
-    required this.previousValue,
-    required this.prefix,
-  });
+class _WeekSectionLabel extends StatelessWidget {
+  const _WeekSectionLabel({required this.label});
 
-  final int currentValue;
-  final int previousValue;
-  final String prefix;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
-    final difference = currentValue - previousValue;
-    final percent = _changePercent(currentValue, previousValue);
-    final sign = difference > 0 ? '+' : '';
-
     return Text(
-      '$prefix: $sign$difference / $sign$percent% vs poprzedni tydzień',
-      style: TextStyle(
-        color: difference >= 0 ? appBrand : appDanger,
+      label,
+      style: const TextStyle(
+        color: appTextSecondary,
         fontSize: 11,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w900,
       ),
     );
   }
 }
 
-class _WeekChangeBadge extends StatelessWidget {
-  const _WeekChangeBadge({
-    required this.currentValue,
-    required this.previousValue,
-  });
+class _WeekDeltaBadge extends StatelessWidget {
+  const _WeekDeltaBadge({required this.delta});
 
-  final int currentValue;
-  final int previousValue;
+  final int delta;
 
   @override
   Widget build(BuildContext context) {
-    final difference = currentValue - previousValue;
-    final percent = _changePercent(currentValue, previousValue);
-    final sign = difference > 0 ? '+' : '';
-    final color = difference >= 0 ? appBrand : appDanger;
+    final isPositive = delta > 0;
+    final isNegative = delta < 0;
+    final color = isPositive
+        ? appSuccess
+        : isNegative
+        ? appDanger
+        : appTextSecondary;
+    final text = isPositive ? '+$delta' : delta.toString();
 
-    return Text(
-      '$sign$difference / $sign$percent%',
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        color: color,
-        fontSize: 9.5,
-        fontWeight: FontWeight.w700,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        text,
+        maxLines: 1,
+        style: TextStyle(
+          color: color,
+          fontSize: 9,
+          fontWeight: FontWeight.w900,
+        ),
       ),
     );
   }
-}
-
-int _changePercent(int currentValue, int previousValue) {
-  if (previousValue == 0) {
-    return currentValue == 0 ? 0 : 100;
-  }
-  return (((currentValue - previousValue) / previousValue) * 100).round();
 }
 
 class _DashboardList extends StatelessWidget {
@@ -2644,61 +2790,18 @@ class _DashboardList extends StatelessWidget {
     required this.contacts,
     required this.onDelete,
     this.onContactChanged,
-    this.headerTrailing,
-    this.onEditMeetingTime,
     this.leadingIcon,
   });
 
   final String title;
-  final String? headerTrailing;
   final String emptyText;
   final List<Contact> contacts;
   final ValueChanged<Contact> onDelete;
   final ValueChanged<Contact>? onContactChanged;
-  final ValueChanged<Contact>? onEditMeetingTime;
   final IconData? leadingIcon;
 
   @override
   Widget build(BuildContext context) {
-    final useSplitMeetingTiles = onEditMeetingTime != null;
-
-    if (useSplitMeetingTiles) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (contacts.isEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: appSurface,
-                border: Border.all(color: appBorderStrong),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SizedBox(
-                width: double.infinity,
-                child: Text(
-                  emptyText,
-                  style: const TextStyle(color: appTextSecondary),
-                ),
-              ),
-            )
-          else
-            for (var index = 0; index < contacts.length; index++) ...[
-              if (index > 0) const SizedBox(height: 10),
-              _RecentContactTile(
-                contact: contacts[index],
-                onDelete: () => onDelete(contacts[index]),
-                onContactChanged: onContactChanged,
-                onEditMeetingTime: useSplitMeetingTiles
-                    ? () => onEditMeetingTime!(contacts[index])
-                    : null,
-              ),
-            ],
-        ],
-      );
-    }
-
     return Container(
       padding: const EdgeInsets.all(5),
       decoration: BoxDecoration(
@@ -2738,13 +2841,11 @@ class _RecentContactTile extends StatefulWidget {
     required this.contact,
     required this.onDelete,
     this.onContactChanged,
-    this.onEditMeetingTime,
   });
 
   final Contact contact;
   final VoidCallback onDelete;
   final ValueChanged<Contact>? onContactChanged;
-  final VoidCallback? onEditMeetingTime;
 
   @override
   State<_RecentContactTile> createState() => _RecentContactTileState();
@@ -2782,22 +2883,15 @@ class _RecentContactTileState extends State<_RecentContactTile> {
   Widget build(BuildContext context) {
     final contact = _displayContact;
     final isMeeting = _isMeetingStatus(contact.status);
-    final useMeetingLayout = isMeeting && widget.onEditMeetingTime != null;
     final trailingText = isMeeting
         ? (contact.contactTime.length >= 5
               ? contact.contactTime.substring(0, 5)
               : contact.contactTime)
-        : _statusByValue(contact.status).label;
-    final tile = useMeetingLayout
-        ? _MeetingDashboardTileContent(
-            contact: contact,
-            timeText: trailingText,
-            onEditMeetingTime: widget.onEditMeetingTime,
-          )
-        : _ContactDashboardTileContent(
-            contact: contact,
-            trailingText: trailingText,
-          );
+        : '';
+    final tile = _ContactDashboardTileContent(
+      contact: contact,
+      trailingText: trailingText,
+    );
 
     return GestureDetector(
       onHorizontalDragUpdate: (details) {
@@ -2890,124 +2984,6 @@ class _RecentContactTileState extends State<_RecentContactTile> {
   }
 }
 
-class _MeetingDashboardTileContent extends StatelessWidget {
-  const _MeetingDashboardTileContent({
-    required this.contact,
-    required this.timeText,
-    required this.onEditMeetingTime,
-  });
-
-  final Contact contact;
-  final String timeText;
-  final VoidCallback? onEditMeetingTime;
-
-  @override
-  Widget build(BuildContext context) {
-    final note = contact.note.trim();
-
-    return Material(
-      color: appSurfaceSoft,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: const BorderSide(color: appBorderStrong),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 10, // lewy i prawy
-          vertical: 8, // górny i dolny
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                InkWell(
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: onEditMeetingTime,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 4,
-                    ),
-                    child: Text(
-                      timeText,
-                      style: const TextStyle(
-                        color: appBrand,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _DashboardContactTitle(
-                    contact: contact,
-                    titleFontSize: 15,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      tooltip: 'Nawiguj',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: contact.address.isEmpty
-                          ? null
-                          : () => _openMap(context, contact.address),
-                      icon: const Icon(Icons.home_outlined),
-                    ),
-                    IconButton(
-                      tooltip: 'Zadzwoń',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: contact.phone.isEmpty
-                          ? null
-                          : () => _callPhone(context, contact.phone),
-                      icon: const Icon(Icons.phone_outlined),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            if (note.isNotEmpty) ...[
-              const SizedBox(height: 4),
-              const Divider(height: 1, thickness: 1, color: appBorder),
-              const SizedBox(height: 4),
-              Text(
-                note,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: appTextSecondary, fontSize: 12),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DashboardContactTitle extends StatelessWidget {
-  const _DashboardContactTitle({required this.contact, this.titleFontSize});
-
-  final Contact contact;
-  final double? titleFontSize;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      contact.contactName.isEmpty ? 'Bez nazwy' : contact.contactName,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: const TextStyle(
-        color: appTextPrimary,
-        fontWeight: FontWeight.w900,
-      ).copyWith(fontSize: titleFontSize),
-    );
-  }
-}
-
 class _ContactDashboardTileContent extends StatelessWidget {
   const _ContactDashboardTileContent({
     required this.contact,
@@ -3040,15 +3016,17 @@ class _ContactDashboardTileContent extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Expanded(child: _DashboardContactText(contact: contact)),
-            const SizedBox(width: 8),
-            Text(
-              trailingText,
-              style: const TextStyle(
-                color: appBrand,
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+            if (trailingText.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Text(
+                trailingText,
+                style: const TextStyle(
+                  color: appBrand,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -3964,6 +3942,42 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
     }
   }
 
+  Future<void> _saveStatusInline(String status) async {
+    if (_isSaving || status == _status) return;
+
+    final previousStatus = _status;
+    setState(() {
+      _status = status;
+      _isSaving = true;
+    });
+
+    try {
+      final updatedData = await _supabase
+          .from('clients')
+          .update({'status': status})
+          .eq('id', client.id)
+          .select()
+          .single();
+
+      if (!mounted) return;
+      final updatedClient = Client.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      setState(() {
+        _currentClient = updatedClient;
+        _status = updatedClient.status;
+      });
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      setState(() => _status = previousStatus);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final statusStyle = _clientStatusStyle(_status);
@@ -4050,6 +4064,12 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
               onPressed: _isSaving ? null : _moveBackToMeeting,
               icon: const Icon(Icons.event_available_outlined),
               label: const Text('Wróć do spotkań'),
+            ),
+            const SizedBox(height: 12),
+            _ClientStageSelector(
+              value: _status,
+              enabled: !_isSaving,
+              onChanged: _saveStatusInline,
             ),
             const SizedBox(height: 18),
             AnimatedSwitcher(
@@ -4168,51 +4188,10 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
           },
         ),
         const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: _status,
-          decoration: const InputDecoration(labelText: 'Status realizacji'),
-          items: const [
-            DropdownMenuItem(
-              value: 'signed_contract',
-              child: Text('Spisana umowa'),
-            ),
-            DropdownMenuItem(
-              value: 'financing_approved',
-              child: Text('Po finansowaniu'),
-            ),
-            DropdownMenuItem(
-              value: 'partial_payment_paid',
-              child: Text('Wpłacona zaliczka'),
-            ),
-            DropdownMenuItem(
-              value: 'welcome_call_done',
-              child: Text('Po telefonie powitalnym'),
-            ),
-            DropdownMenuItem(
-              value: 'scheduling_installation',
-              child: Text('W trakcie umawiania montażu'),
-            ),
-            DropdownMenuItem(
-              value: 'in_installation',
-              child: Text('W trakcie montażu'),
-            ),
-            DropdownMenuItem(
-              value: 'installed',
-              child: Text('Zamontowany / po montażu'),
-            ),
-            DropdownMenuItem(
-              value: 'reported_to_grid_operator',
-              child: Text('Zgłoszony do ZEI'),
-            ),
-            DropdownMenuItem(
-              value: 'subsidy_reported',
-              child: Text('Przyznana dotacja'),
-            ),
-            DropdownMenuItem(value: 'lost', child: Text('Spad')),
-          ],
-          onChanged: (value) {
-            if (value != null) setState(() => _status = value);
-          },
+        _ClientStageSelector(
+          value: _status,
+          enabled: !_isSaving,
+          onChanged: (value) => setState(() => _status = value),
         ),
         const SizedBox(height: 16),
         FilledButton(
@@ -4220,6 +4199,83 @@ class _ClientDetailsSheetState extends State<ClientDetailsSheet> {
           child: Text(_isSaving ? 'Zapisuję...' : 'Zapisz zmiany'),
         ),
       ],
+    );
+  }
+}
+
+class _ClientStageSelector extends StatelessWidget {
+  const _ClientStageSelector({
+    required this.value,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String value;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  static const _values = {
+    'signed_contract',
+    'financing_approved',
+    'partial_payment_paid',
+    'welcome_call_done',
+    'scheduling_installation',
+    'in_installation',
+    'installed',
+    'reported_to_grid_operator',
+    'subsidy_reported',
+    'lost',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<String>(
+      initialValue: _values.contains(value) ? value : 'signed_contract',
+      decoration: const InputDecoration(labelText: 'Etap realizacji'),
+      items: const [
+        DropdownMenuItem(
+          value: 'signed_contract',
+          child: Text('Spisana umowa'),
+        ),
+        DropdownMenuItem(
+          value: 'financing_approved',
+          child: Text('Po finansowaniu'),
+        ),
+        DropdownMenuItem(
+          value: 'partial_payment_paid',
+          child: Text('Wpłacona zaliczka'),
+        ),
+        DropdownMenuItem(
+          value: 'welcome_call_done',
+          child: Text('Po telefonie powitalnym'),
+        ),
+        DropdownMenuItem(
+          value: 'scheduling_installation',
+          child: Text('W trakcie umawiania montażu'),
+        ),
+        DropdownMenuItem(
+          value: 'in_installation',
+          child: Text('W trakcie montażu'),
+        ),
+        DropdownMenuItem(
+          value: 'installed',
+          child: Text('Zamontowany / po montażu'),
+        ),
+        DropdownMenuItem(
+          value: 'reported_to_grid_operator',
+          child: Text('Zgłoszony do ZEI'),
+        ),
+        DropdownMenuItem(
+          value: 'subsidy_reported',
+          child: Text('Przyznana dotacja'),
+        ),
+        DropdownMenuItem(value: 'lost', child: Text('Spad')),
+      ],
+      onChanged: enabled
+          ? (value) {
+              if (value != null) onChanged(value);
+            }
+          : null,
     );
   }
 }
@@ -4321,6 +4377,7 @@ class _ContactsPageState extends State<ContactsPage> {
     final visibleContacts = contacts
         .where((contact) => !_isMeetingStatus(contact.status))
         .toList();
+    visibleContacts.sort(_compareContactsByFavorite);
     _contactsCache = visibleContacts;
     return visibleContacts;
   }
@@ -4350,12 +4407,19 @@ class _ContactsPageState extends State<ContactsPage> {
   }
 
   Future<void> _deleteContact(Contact contact) async {
-    await _supabase.from('contacts').delete().eq('id', contact.id);
-    _reload();
+    await _hideContactFromActiveWork(
+      contact,
+      'Kontakt usunięty z aktywnej listy.',
+    );
+    final nextContacts = _contactsCache
+        .where((item) => item.id != contact.id)
+        .toList();
+    nextContacts.sort(_compareContactsByFavorite);
+    setState(() => _contactsCache = nextContacts);
   }
 
   Future<void> _moveContactToMeeting(Contact contact) async {
-    await _supabase
+    final updatedData = await _supabase
         .from('contacts')
         .update({
           'status': 'scheduled_meeting',
@@ -4365,8 +4429,24 @@ class _ContactsPageState extends State<ContactsPage> {
           'contact_time': '18:00:00',
           'meeting_time': '18:00:00',
         })
-        .eq('id', contact.id);
-    _reload();
+        .eq('id', contact.id)
+        .select()
+        .single();
+    final updatedContact = Contact.fromMap(
+      Map<String, dynamic>.from(updatedData),
+    );
+    await _logContactEvent(
+      contact: updatedContact,
+      eventType: 'meeting_scheduled',
+      eventNote: 'Kontakt przeniesiony do umówionych spotkań.',
+      metadata: {
+        'previous_status': contact.status,
+        'next_status': updatedContact.status,
+        'contact_date': updatedContact.contactDate?.toIso8601String(),
+        'contact_time': updatedContact.contactTime,
+      },
+    );
+    _updateContactInList(updatedContact);
   }
 
   void _toggleContactSelection(Contact contact) {
@@ -4382,7 +4462,11 @@ class _ContactsPageState extends State<ContactsPage> {
 
   void _updateContactInList(Contact updatedContact) {
     if (_isMeetingStatus(updatedContact.status)) {
-      _reload();
+      final nextContacts = _contactsCache
+          .where((contact) => contact.id != updatedContact.id)
+          .toList();
+      nextContacts.sort(_compareContactsByFavorite);
+      setState(() => _contactsCache = nextContacts);
       return;
     }
 
@@ -4396,10 +4480,8 @@ class _ContactsPageState extends State<ContactsPage> {
           ]
         : [..._contactsCache, updatedContact];
 
-    setState(() {
-      _contactsCache = nextContacts;
-      _contactsFuture = Future.value(nextContacts);
-    });
+    nextContacts.sort(_compareContactsByFavorite);
+    setState(() => _contactsCache = nextContacts);
   }
 
   @override
@@ -4420,7 +4502,7 @@ class _ContactsPageState extends State<ContactsPage> {
             );
           }
 
-          final contacts = snapshot.data ?? [];
+          final contacts = _contactsCache;
 
           if (contacts.isEmpty) {
             return Stack(
@@ -4521,6 +4603,7 @@ class _MeetingsPageState extends State<MeetingsPage> {
   late Future<List<Contact>> _meetingsFuture;
   List<Contact> _meetingsCache = [];
   int _meetingTilesResetSignal = 0;
+  DateTime? _selectedMeetingDay;
 
   @override
   void initState() {
@@ -4530,8 +4613,10 @@ class _MeetingsPageState extends State<MeetingsPage> {
 
   Future<List<Contact>> _fetchMeetings() async {
     final contacts = await _fetchActiveContacts();
-    final meetings = contacts.where(_isCurrentOrUpcomingMeeting).toList();
+    final meetings = contacts.where(_isCurrentOrUpcomingMeeting).toList()
+      ..sort((a, b) => _compareContactsByDateAndTime(a, b, newestFirst: false));
     _meetingsCache = meetings;
+    _selectedMeetingDay = _normalizedSelectedMeetingDay(meetings);
     return meetings;
   }
 
@@ -4586,11 +4671,48 @@ class _MeetingsPageState extends State<MeetingsPage> {
               if (contact.id == updatedContact.id) updatedContact else contact,
           ]
         : [..._meetingsCache, updatedContact];
+    nextMeetings.sort(
+      (a, b) => _compareContactsByDateAndTime(a, b, newestFirst: false),
+    );
 
     setState(() {
       _meetingsCache = nextMeetings;
+      _selectedMeetingDay = _normalizedSelectedMeetingDay(nextMeetings);
       _meetingsFuture = Future.value(nextMeetings);
     });
+  }
+
+  DateTime? _normalizedSelectedMeetingDay(List<Contact> meetings) {
+    final days = _meetingDaysFor(meetings);
+    if (days.isEmpty) return null;
+    final selected = _selectedMeetingDay;
+    if (selected != null && days.any((day) => _isSameDay(day, selected))) {
+      return DateTime(selected.year, selected.month, selected.day);
+    }
+    final today = DateTime.now();
+    final todayOnly = DateTime(today.year, today.month, today.day);
+    return days.firstWhere(
+      (day) => !day.isBefore(todayOnly),
+      orElse: () => days.first,
+    );
+  }
+
+  List<DateTime> _meetingDaysFor(List<Contact> meetings) {
+    final days = <DateTime>[];
+    for (final meeting in meetings) {
+      final date = meeting.contactDate;
+      if (date == null) continue;
+      final day = DateTime(date.year, date.month, date.day);
+      if (!days.any((item) => _isSameDay(item, day))) {
+        days.add(day);
+      }
+    }
+    days.sort();
+    return days;
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   Future<void> _moveMeetingToClients(Contact contact) async {
@@ -4610,20 +4732,40 @@ class _MeetingsPageState extends State<MeetingsPage> {
       'status': 'signed_contract',
     });
 
-    await _supabase
+    final updatedData = await _supabase
         .from('contacts')
         .update({
           'status': 'signed_contract',
           'moved_to_client_at': DateTime.now().toIso8601String(),
         })
-        .eq('id', contact.id);
+        .eq('id', contact.id)
+        .select()
+        .single();
+    final updatedContact = Contact.fromMap(
+      Map<String, dynamic>.from(updatedData),
+    );
+    await _logContactEvent(
+      contact: updatedContact,
+      eventType: 'contract_signed',
+      eventNote: 'Spisano umowę i przeniesiono kontakt do realizacji.',
+      metadata: {'previous_status': contact.status},
+    );
 
-    _updateMeetingInList(contact.copyWith(status: 'signed_contract'));
+    _updateMeetingInList(updatedContact);
   }
 
   Future<void> _deleteMeeting(Contact contact) async {
-    await _supabase.from('contacts').delete().eq('id', contact.id);
-    _reload();
+    await _hideContactFromActiveWork(
+      contact,
+      'Spotkanie usunięte z aktywnej listy.',
+    );
+    final nextMeetings = _meetingsCache
+        .where((item) => item.id != contact.id)
+        .toList();
+    setState(() {
+      _meetingsCache = nextMeetings;
+      _selectedMeetingDay = _normalizedSelectedMeetingDay(nextMeetings);
+    });
   }
 
   @override
@@ -4644,7 +4786,23 @@ class _MeetingsPageState extends State<MeetingsPage> {
             );
           }
 
-          final meetings = snapshot.data ?? [];
+          final meetings = _meetingsCache;
+          final meetingDays = _meetingDaysFor(meetings);
+          final selectedDay = _normalizedSelectedMeetingDay(meetings);
+          final visibleMeetings =
+              selectedDay == null
+                    ? meetings
+                    : meetings
+                          .where(
+                            (meeting) =>
+                                meeting.contactDate != null &&
+                                _isSameDay(meeting.contactDate!, selectedDay),
+                          )
+                          .toList()
+                ..sort(
+                  (a, b) =>
+                      _compareContactsByDateAndTime(a, b, newestFirst: false),
+                );
 
           if (meetings.isEmpty) {
             return Stack(
@@ -4701,24 +4859,43 @@ class _MeetingsPageState extends State<MeetingsPage> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.only(bottom: 96),
                       children: [
-                        for (final meeting in meetings)
-                          _ContactTile(
-                            key: ValueKey(meeting.id),
-                            contact: meeting,
-                            isSelected: false,
-                            isSelectionMode: false,
-                            showContactTypePill: false,
-                            showMeetingHeader: true,
-                            primaryActionIcon:
-                                Icons.precision_manufacturing_outlined,
-                            primaryActionLabel: 'Realizacja',
-                            onPrimaryAction: () =>
-                                _moveMeetingToClients(meeting),
-                            onDelete: () => _deleteMeeting(meeting),
-                            onContactChanged: _updateMeetingInList,
-                            onToggleSelection: () {},
-                            resetSignal: _meetingTilesResetSignal,
-                          ),
+                        _MeetingDayFilterHeader(
+                          days: meetingDays,
+                          selectedDay: selectedDay,
+                          onChanged: (day) {
+                            if (day == null) return;
+                            setState(() => _selectedMeetingDay = day);
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        if (visibleMeetings.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 16),
+                            child: _EmptyState(
+                              icon: Icons.event_available_outlined,
+                              text: 'Brak spotkań w wybranym dniu.',
+                              detail: 'Wybierz inny dzień z listy.',
+                            ),
+                          )
+                        else
+                          for (final meeting in visibleMeetings)
+                            _ContactTile(
+                              key: ValueKey(meeting.id),
+                              contact: meeting,
+                              isSelected: false,
+                              isSelectionMode: false,
+                              showContactTypePill: false,
+                              showMeetingHeader: true,
+                              primaryActionIcon:
+                                  Icons.precision_manufacturing_outlined,
+                              primaryActionLabel: 'Realizacja',
+                              onPrimaryAction: () =>
+                                  _moveMeetingToClients(meeting),
+                              onDelete: () => _deleteMeeting(meeting),
+                              onContactChanged: _updateMeetingInList,
+                              onToggleSelection: () {},
+                              resetSignal: _meetingTilesResetSignal,
+                            ),
                       ],
                     ),
                   ),
@@ -4738,6 +4915,71 @@ class _MeetingsPageState extends State<MeetingsPage> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _MeetingDayFilterHeader extends StatelessWidget {
+  const _MeetingDayFilterHeader({
+    required this.days,
+    required this.selectedDay,
+    required this.onChanged,
+  });
+
+  final List<DateTime> days;
+  final DateTime? selectedDay;
+  final ValueChanged<DateTime?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        decoration: BoxDecoration(
+          color: appSurfaceSoft,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: appBorderStrong),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.calendar_today_outlined,
+              size: 18,
+              color: appTextSecondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: DropdownButtonHideUnderline(
+                child: DropdownButton<DateTime>(
+                  value: selectedDay,
+                  isExpanded: true,
+                  icon: const Icon(Icons.keyboard_arrow_down),
+                  hint: const Text('Wybierz dzień'),
+                  items: [
+                    for (final day in days)
+                      DropdownMenuItem<DateTime>(
+                        value: day,
+                        child: Text(
+                          '${_shortDate(day)} | ${_weekdayNameFull(day)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: appTextPrimary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                  ],
+                  onChanged: onChanged,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -4859,6 +5101,59 @@ class _ContactTileState extends State<_ContactTile> {
       final updatedContact = Contact.fromMap(
         Map<String, dynamic>.from(updatedData),
       );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: 'contact_status_changed',
+        eventNote: 'Zmieniono status kontaktu.',
+        metadata: {
+          'previous_contact_status': contact.contactStatus,
+          'next_contact_status': selected,
+        },
+      );
+      setState(() => _displayContact = updatedContact);
+      widget.onContactChanged(updatedContact);
+    } on PostgrestException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  Future<void> _pickAndSaveContactReminder(
+    BuildContext context,
+    Contact contact,
+  ) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate:
+          contact.contactNotification ??
+          DateTime.now().add(const Duration(days: 1)),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+      helpText: 'Kiedy zadzwonić?',
+    );
+    if (!mounted || picked == null) return;
+
+    final reminder = DateTime(picked.year, picked.month, picked.day);
+
+    try {
+      final updatedData = await _supabase
+          .from('contacts')
+          .update({'contact_notification': reminder.toIso8601String()})
+          .eq('id', contact.id)
+          .select()
+          .single();
+      if (!mounted) return;
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: 'contact_reminder_changed',
+        eventNote: 'Ustawiono termin kontaktu.',
+        metadata: {'contact_notification': reminder.toIso8601String()},
+      );
       setState(() => _displayContact = updatedContact);
       widget.onContactChanged(updatedContact);
     } on PostgrestException catch (error) {
@@ -4892,6 +5187,15 @@ class _ContactTileState extends State<_ContactTile> {
       final updatedContact = Contact.fromMap(
         Map<String, dynamic>.from(updatedData),
       );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: 'contact_type_changed',
+        eventNote: 'Zmieniono typ kontaktu.',
+        metadata: {
+          'previous_contact_type': contact.contactType,
+          'next_contact_type': nextRaw,
+        },
+      );
       setState(() => _displayContact = updatedContact);
       widget.onContactChanged(updatedContact);
     } on PostgrestException catch (error) {
@@ -4907,18 +5211,19 @@ class _ContactTileState extends State<_ContactTile> {
     final contact = _displayContact;
     final status = _statusByValue(contact.status);
     final contactTypeStatuses = _contactTypeStatusesFor(contact);
-    final contactWorkStatus =
-        contact.contactStatus == null || contact.contactStatus!.isEmpty
+    final effectiveContactWorkStatus = _effectiveContactWorkStatusValue(
+      contact,
+    );
+    final contactWorkStatus = effectiveContactWorkStatus == null
         ? null
-        : _statusByValue(contact.contactStatus!);
+        : _statusByValue(effectiveContactWorkStatus);
     final subtitle = _contactSubtitle(contact);
     final isMeetingTile =
         widget.showMeetingHeader &&
         _stageForContactStatus(contact.status) == 'meeting';
-    final showContactHeader =
-        !isMeetingTile &&
-        widget.showContactTypePill &&
-        (contactTypeStatuses.isNotEmpty || contactWorkStatus != null);
+    final showContactHeader = !isMeetingTile && widget.showContactTypePill;
+    final isFavorite = _isFavoriteContactQuality(contact.contactQuality);
+    final hasContactReminder = contact.contactNotification != null;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
@@ -5052,6 +5357,11 @@ class _ContactTileState extends State<_ContactTile> {
                                         ),
                                         child: _ContactTypeDots(
                                           statuses: contactTypeStatuses,
+                                          onAddTap: () =>
+                                              _pickAndSaveContactTypes(
+                                                context,
+                                                contact,
+                                              ),
                                         ),
                                       ),
                               ),
@@ -5126,19 +5436,42 @@ class _ContactTileState extends State<_ContactTile> {
                               const SizedBox(width: 8),
                             ],
                             Expanded(
-                              child: Text(
-                                contact.contactName.isEmpty
-                                    ? 'Bez nazwy'
-                                    : contact.contactName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: appTextPrimary,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.w900,
-                                ),
+                              child: Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      contact.contactName.isEmpty
+                                          ? 'Bez nazwy'
+                                          : contact.contactName,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: appTextPrimary,
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                  ),
+                                  if (!isMeetingTile) ...[
+                                    const SizedBox(width: 5),
+                                    _FavoriteContactStar(
+                                      isFavorite: isFavorite,
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
+                            if (!isMeetingTile &&
+                                effectiveContactWorkStatus == 'to_call' &&
+                                !hasContactReminder) ...[
+                              const SizedBox(width: 6),
+                              _ContactReminderButton(
+                                onTap: () => _pickAndSaveContactReminder(
+                                  context,
+                                  contact,
+                                ),
+                              ),
+                            ],
                             if (!widget.isSelectionMode) ...[
                               const SizedBox(width: 10),
                               Row(
@@ -5333,6 +5666,49 @@ class _DialogTitleWithClose extends StatelessWidget {
   }
 }
 
+class _FavoriteContactStar extends StatelessWidget {
+  const _FavoriteContactStar({required this.isFavorite});
+
+  final bool isFavorite;
+
+  @override
+  Widget build(BuildContext context) {
+    return Icon(
+      isFavorite ? Icons.star_rounded : Icons.star_border_rounded,
+      color: appTextPrimary,
+      size: 21,
+    );
+  }
+}
+
+class _ContactReminderButton extends StatelessWidget {
+  const _ContactReminderButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Ustaw dzień kontaktu',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: onTap,
+        child: SizedBox(
+          width: 28,
+          height: 28,
+          child: const Center(
+            child: Icon(
+              Icons.notifications_none_outlined,
+              color: appTextPrimary,
+              size: 21,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ContactStatusPill extends StatelessWidget {
   const _ContactStatusPill({required this.status, this.onTap});
 
@@ -5376,26 +5752,17 @@ class _ContactStatusPill extends StatelessWidget {
 }
 
 class _ContactTypeDots extends StatelessWidget {
-  const _ContactTypeDots({required this.statuses});
+  const _ContactTypeDots({required this.statuses, required this.onAddTap});
 
   final List<ContactStatus> statuses;
+  final VoidCallback onAddTap;
 
   @override
   Widget build(BuildContext context) {
+    final canAddType = statuses.length < 3;
+
     if (statuses.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 4),
-        child: Text(
-          'Dodaj typ',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            color: appTextSecondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      );
+      return _ContactTypeAddButton(label: 'Dodaj typ', onTap: onAddTap);
     }
 
     return SingleChildScrollView(
@@ -5406,6 +5773,10 @@ class _ContactTypeDots extends StatelessWidget {
           for (var index = 0; index < statuses.length; index++) ...[
             if (index > 0) const SizedBox(width: 6),
             _ContactTypeChoice(type: statuses[index], selected: true),
+          ],
+          if (canAddType) ...[
+            const SizedBox(width: 6),
+            _ContactTypeAddButton(onTap: onAddTap),
           ],
         ],
       ),
@@ -5476,6 +5847,19 @@ Future<String?> _showContactWorkStatusPicker(
                         ),
                       ),
                     ),
+                    TextButton.icon(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const ContactStatusesPage(
+                              closeToContactDetails: true,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.edit_outlined, size: 18),
+                      label: const Text('Edytuj'),
+                    ),
                     IconButton(
                       tooltip: 'Zamknij',
                       onPressed: () => Navigator.of(context).pop(value),
@@ -5486,23 +5870,10 @@ Future<String?> _showContactWorkStatusPicker(
                 const SizedBox(height: 8),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(
-                        color: safeValue == null
-                            ? appTextSecondary
-                            : appBorderStrong,
-                      ),
-                    ),
-                    title: const Text(
-                      'Brak statusu',
-                      style: TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    trailing: safeValue == null
-                        ? const Icon(Icons.check, color: appTextSecondary)
-                        : null,
-                    onTap: () => Navigator.of(context).pop(null),
+                  child: _InlineContactStatusCreateTile(
+                    stage: 'contact',
+                    onCreated: (status) =>
+                        Navigator.of(context).pop(status.value),
                   ),
                 ),
                 for (final status in currentStatuses)
@@ -5848,8 +6219,8 @@ class _ContactTypeAddButton extends StatelessWidget {
         borderRadius: BorderRadius.circular(999),
         onTap: onTap,
         child: Container(
-          width: label == null ? 32 : 90,
-          height: label == null ? 32 : null,
+          width: label == null ? 32 : 70,
+          height: label == null ? 30 : null,
           padding: label == null
               ? EdgeInsets.zero
               : const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
@@ -5866,7 +6237,7 @@ class _ContactTypeAddButton extends StatelessWidget {
                   label,
                   style: const TextStyle(
                     color: appTextSecondary,
-                    fontSize: 12,
+                    fontSize: 10,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -6007,6 +6378,121 @@ Future<ContactStatus?> _showContactTypePicker(
   );
 }
 
+Future<ContactStatus?> _createInlineCustomStatus({
+  required String stage,
+  required String label,
+}) async {
+  final trimmedLabel = label.trim();
+  if (trimmedLabel.isEmpty) return null;
+
+  final nextStatus = ContactStatus(
+    'custom_${DateTime.now().microsecondsSinceEpoch}',
+    trimmedLabel,
+    _automaticStatusColor(stage),
+    stage: stage,
+    isSystem: false,
+  );
+  final statuses = [..._customContactStatusesNotifier.value, nextStatus];
+  await _saveCustomContactStatuses(statuses);
+  return nextStatus;
+}
+
+class _InlineContactStatusCreateTile extends StatefulWidget {
+  const _InlineContactStatusCreateTile({
+    required this.stage,
+    required this.onCreated,
+  });
+
+  final String stage;
+  final ValueChanged<ContactStatus> onCreated;
+
+  @override
+  State<_InlineContactStatusCreateTile> createState() =>
+      _InlineContactStatusCreateTileState();
+}
+
+class _InlineContactStatusCreateTileState
+    extends State<_InlineContactStatusCreateTile> {
+  final TextEditingController _controller = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
+  bool _isEditing = false;
+  bool _isSaving = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _startEditing() {
+    setState(() => _isEditing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  Future<void> _save() async {
+    if (_isSaving) return;
+    final label = _controller.text.trim();
+    if (label.isEmpty) return;
+
+    setState(() => _isSaving = true);
+    try {
+      final created = await _createInlineCustomStatus(
+        stage: widget.stage,
+        label: label,
+      );
+      if (created == null || !mounted) return;
+      widget.onCreated(created);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Nie udało się zapisać statusu: $error')),
+        );
+      setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(8),
+        side: const BorderSide(color: appBorderStrong),
+      ),
+      leading: IconButton(
+        tooltip: 'Dodaj status',
+        onPressed: _isEditing ? _save : _startEditing,
+        icon: Icon(_isEditing ? Icons.check : Icons.add),
+      ),
+      title: _isEditing
+          ? TextField(
+              controller: _controller,
+              focusNode: _focusNode,
+              enabled: !_isSaving,
+              textInputAction: TextInputAction.done,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Wpisz status',
+              ),
+              onSubmitted: (_) => _save(),
+            )
+          : const SizedBox.shrink(),
+      trailing: _isSaving
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : null,
+      onTap: _isEditing ? null : _startEditing,
+    );
+  }
+}
+
 class _StatusPickerField extends StatelessWidget {
   const _StatusPickerField({
     required this.stage,
@@ -6053,17 +6539,17 @@ class _StatusPickerField extends StatelessWidget {
                         ),
                       ),
                       TextButton.icon(
-                        onPressed: () async {
-                          final created = await showContactStatusEditor(
-                            context,
-                            stage: stage,
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const ContactStatusesPage(
+                                closeToContactDetails: true,
+                              ),
+                            ),
                           );
-                          if (created == null) return;
-                          onChanged(created.value);
-                          if (context.mounted) Navigator.of(context).pop();
                         },
-                        icon: const Icon(Icons.add, size: 18),
-                        label: const Text('Dodaj status'),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('Edytuj'),
                       ),
                       IconButton(
                         tooltip: 'Zamknij',
@@ -6075,24 +6561,10 @@ class _StatusPickerField extends StatelessWidget {
                   const SizedBox(height: 8),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: ListTile(
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        side: BorderSide(
-                          color: safeValue == null
-                              ? appTextSecondary
-                              : appBorderStrong,
-                        ),
-                      ),
-                      title: const Text(
-                        'Brak statusu',
-                        style: TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      trailing: safeValue == null
-                          ? const Icon(Icons.check, color: appTextSecondary)
-                          : null,
-                      onTap: () {
-                        onChanged(null);
+                    child: _InlineContactStatusCreateTile(
+                      stage: stage,
+                      onCreated: (status) {
+                        onChanged(status.value);
                         Navigator.of(context).pop();
                       },
                     ),
@@ -6390,10 +6862,14 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
   late List<String> _contactTypes;
   late DateTime _contactDate;
   late TimeOfDay _contactTime;
-  String? _contactQuality;
+  bool _isFavoriteContact = false;
+  String? _contactPotentialQuality;
   bool _isSaving = false;
+  Timer? _autosaveTimer;
+  bool _isAutosaving = false;
+  Contact? _latestSavedContact;
 
-  Contact get contact => widget.contact;
+  Contact get contact => _latestSavedContact ?? widget.contact;
 
   @override
   void initState() {
@@ -6413,19 +6889,23 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
         ? initialStatus
         : stageStatuses.first.value;
     final contactStatuses = _statusesForStage('contact');
+    final effectiveContactWorkStatus = _effectiveContactWorkStatusValue(
+      contact,
+    );
     _contactWorkStatus =
-        contact.contactStatus != null &&
+        effectiveContactWorkStatus != null &&
             contactStatuses.any(
-              (status) => status.value == contact.contactStatus,
+              (status) => status.value == effectiveContactWorkStatus,
             )
-        ? contact.contactStatus
+        ? effectiveContactWorkStatus
         : null;
     _contactDate =
         contact.contactDate ?? DateTime.now().add(const Duration(days: 1));
     _contactTime = _timeOfDayFromText(contact.contactTime);
-    _contactQuality = contact.contactQuality.isEmpty
-        ? null
-        : contact.contactQuality;
+    _isFavoriteContact = _isFavoriteContactQuality(contact.contactQuality);
+    _contactPotentialQuality = _contactPotentialQualityFromRaw(
+      contact.contactQuality,
+    );
     _contactTypes = _contactTypeValuesFromRaw(
       contact.contactType.isNotEmpty
           ? contact.contactType
@@ -6435,6 +6915,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
 
   @override
   void dispose() {
+    _autosaveTimer?.cancel();
     _nameController.dispose();
     _phoneController.dispose();
     _addressController.dispose();
@@ -6442,66 +6923,106 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     super.dispose();
   }
 
-  Future<void> _save() async {
-    if (_isSaving) return;
+  Map<String, dynamic> _contactDetailsPayload() {
+    final payload = <String, dynamic>{
+      'contact_name': _nameController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'address': _addressController.text.trim(),
+      'status': _stageForContactStatus(_status) == 'contact'
+          ? 'contact'
+          : _status,
+      'contact_status': _stageForContactStatus(_status) == 'contact'
+          ? _contactWorkStatus
+          : null,
+      'note': _noteController.text.trim(),
+      'contact_date': null,
+      'contact_time': null,
+      'meeting_time': null,
+      'contact_notification': null,
+      'contact_type': _contactTypes.isEmpty
+          ? null
+          : _contactTypeValuesToRaw(_contactTypes),
+      'contact_quality': _contactQualityRaw(
+        isFavorite: _isFavoriteContact,
+        potential: _contactPotentialQuality,
+      ),
+    };
 
-    setState(() => _isSaving = true);
-    try {
-      final payload = <String, dynamic>{
-        'contact_name': _nameController.text.trim(),
-        'phone': _phoneController.text.trim(),
-        'address': _addressController.text.trim(),
-        'status': _stageForContactStatus(_status) == 'contact'
-            ? 'contact'
-            : _status,
-        'contact_status': _stageForContactStatus(_status) == 'contact'
-            ? _contactWorkStatus
-            : null,
-        'note': _noteController.text.trim(),
-        'contact_date': null,
-        'contact_time': null,
-        'meeting_time': null,
-        'contact_notification': null,
-        'contact_type': _contactTypes.isEmpty
-            ? null
-            : _contactTypeValuesToRaw(_contactTypes),
-      };
+    if (_stageForContactStatus(_status) == 'meeting') {
+      payload.addAll({
+        'contact_date': _dateOnly(_contactDate),
+        'contact_time': _timeOnly(_contactTime),
+        'meeting_time': _timeOnly(_contactTime),
+      });
+    }
 
-      if (_stageForContactStatus(_status) == 'meeting') {
-        payload.addAll({
-          'contact_date': _dateOnly(_contactDate),
-          'contact_time': _timeOnly(_contactTime),
-          'meeting_time': _timeOnly(_contactTime),
-          'contact_quality': _contactQuality,
-        });
-      }
+    return payload;
+  }
 
-      final updatedData = await _supabase
-          .from('contacts')
-          .update(payload)
-          .eq('id', contact.id)
-          .select()
-          .single();
+  void _queueContactDetailsAutosave() {
+    _autosaveTimer?.cancel();
+    _autosaveTimer = Timer(
+      const Duration(milliseconds: 650),
+      () => unawaited(_saveContactDetailsInline()),
+    );
+  }
 
-      if (!mounted) return;
-      final updatedContact = Contact.fromMap(
-        Map<String, dynamic>.from(updatedData),
-      );
-      Navigator.of(context).pop(updatedContact);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Kontakt został zapisany.')));
-    } on PostgrestException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
+  Future<void> _flushContactDetailsAutosave() async {
+    final pending = _autosaveTimer?.isActive ?? false;
+    _autosaveTimer?.cancel();
+    if (pending) {
+      await _saveContactDetailsInline();
     }
   }
 
-  Future<void> _updateContact(Map<String, dynamic> payload) async {
+  Future<void> _saveContactDetailsInline() async {
+    if (_isAutosaving) return;
+
+    final currentContact = contact;
+    final payload = _contactDetailsPayload();
+
+    setState(() => _isAutosaving = true);
+    try {
+      final updatedData = await _supabase
+          .from('contacts')
+          .update(payload)
+          .eq('id', currentContact.id)
+          .select()
+          .single();
+      if (!mounted) return;
+
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: 'contact_updated',
+        eventNote: 'Autozapis zmian w kontakcie.',
+        metadata: {
+          'previous_status': currentContact.status,
+          'next_status': updatedContact.status,
+          'previous_contact_status': currentContact.contactStatus,
+          'next_contact_status': updatedContact.contactStatus,
+        },
+      );
+      if (!mounted) return;
+      setState(() => _latestSavedContact = updatedContact);
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    } finally {
+      if (mounted) setState(() => _isAutosaving = false);
+    }
+  }
+
+  Future<void> _updateContact(
+    Map<String, dynamic> payload, {
+    String eventType = 'contact_updated',
+    String eventNote = 'Zaktualizowano kontakt.',
+    Map<String, dynamic> eventMetadata = const {},
+  }) async {
     if (_isSaving) return;
 
     setState(() => _isSaving = true);
@@ -6516,6 +7037,17 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
       final updatedContact = Contact.fromMap(
         Map<String, dynamic>.from(updatedData),
       );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: eventType,
+        eventNote: eventNote,
+        metadata: {
+          'previous_status': contact.status,
+          'next_status': updatedContact.status,
+          ...eventMetadata,
+        },
+      );
+      if (!mounted) return;
       Navigator.of(context).pop(updatedContact);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kontakt został zaktualizowany.')),
@@ -6530,12 +7062,99 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     }
   }
 
+  Future<void> _saveInlineContactChange(
+    Map<String, dynamic> payload, {
+    required String eventType,
+    required String eventNote,
+    Map<String, dynamic> eventMetadata = const {},
+  }) async {
+    final currentContact = contact;
+
+    try {
+      final updatedData = await _supabase
+          .from('contacts')
+          .update(payload)
+          .eq('id', currentContact.id)
+          .select()
+          .single();
+      if (!mounted) return;
+
+      final updatedContact = Contact.fromMap(
+        Map<String, dynamic>.from(updatedData),
+      );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: eventType,
+        eventNote: eventNote,
+        metadata: {
+          'previous_status': currentContact.status,
+          'next_status': updatedContact.status,
+          'previous_contact_status': currentContact.contactStatus,
+          'next_contact_status': updatedContact.contactStatus,
+          ...eventMetadata,
+        },
+      );
+      if (!mounted) return;
+      setState(() => _latestSavedContact = updatedContact);
+    } on PostgrestException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  Future<void> _changeContactWorkStatus(String? value) async {
+    setState(() => _contactWorkStatus = value);
+    await _saveInlineContactChange(
+      {'contact_status': value},
+      eventType: 'contact_status_changed',
+      eventNote: 'Zmieniono status kontaktu.',
+      eventMetadata: {'next_contact_status': value},
+    );
+  }
+
+  Future<void> _changeFavoriteContact(bool value) async {
+    setState(() => _isFavoriteContact = value);
+    await _saveInlineContactChange(
+      {
+        'contact_quality': _contactQualityRaw(
+          isFavorite: value,
+          potential: _contactPotentialQuality,
+        ),
+      },
+      eventType: 'contact_favorite_changed',
+      eventNote: value
+          ? 'Oznaczono kontakt jako ulubiony.'
+          : 'Usunięto oznaczenie ulubionego kontaktu.',
+      eventMetadata: {'is_favorite': value},
+    );
+  }
+
+  Future<void> _changeContactPotentialQuality(String? value) async {
+    setState(() => _contactPotentialQuality = value);
+    await _saveInlineContactChange(
+      {
+        'contact_quality': _contactQualityRaw(
+          isFavorite: _isFavoriteContact,
+          potential: value,
+        ),
+      },
+      eventType: 'contact_quality_changed',
+      eventNote: 'Zmieniono jakość kontaktu.',
+      eventMetadata: {'contact_quality': value},
+    );
+  }
+
   Future<void> _deleteCurrentContact() async {
     if (_isSaving) return;
 
     setState(() => _isSaving = true);
     try {
-      await _supabase.from('contacts').delete().eq('id', contact.id);
+      await _hideContactFromActiveWork(
+        contact,
+        'Kontakt usunięty z aktywnego widoku.',
+      );
       if (!mounted) return;
       Navigator.of(context).pop(contact.copyWith(status: 'not_interested'));
       ScaffoldMessenger.of(
@@ -6556,29 +7175,41 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     if (!mounted) return;
 
     if (date == null) {
-      await _updateContact({
-        'status': 'postponed',
-        'contact_notification': DateTime.now()
-            .add(const Duration(hours: 4))
-            .toIso8601String(),
-        'note': _mergeNote(
-          'Przełożone: ustalić nowy termin przed zamknięciem cyklu.',
-        ),
-      });
+      await _updateContact(
+        {
+          'status': 'postponed',
+          'contact_notification': DateTime.now()
+              .add(const Duration(hours: 4))
+              .toIso8601String(),
+          'note': _mergeNote(
+            'Przełożone: ustalić nowy termin przed zamknięciem cyklu.',
+          ),
+        },
+        eventType: 'meeting_postponed',
+        eventNote: 'Spotkanie przełożone bez nowego terminu.',
+      );
       return;
     }
 
-    await _updateContact({
-      'status': 'scheduled_meeting',
-      'contact_date': _dateOnly(date),
-      'contact_time': _timeOnly(_contactTime),
-      'meeting_time': _timeOnly(_contactTime),
-      'contact_quality': _contactQuality,
-      'contact_notification': null,
-      'note': _mergeNote(
-        'Przełożone na ${_shortDate(date)} (${_weekdayName(date)}).',
-      ),
-    });
+    await _updateContact(
+      {
+        'status': 'scheduled_meeting',
+        'contact_date': _dateOnly(date),
+        'contact_time': _timeOnly(_contactTime),
+        'meeting_time': _timeOnly(_contactTime),
+        'contact_quality': _contactQualityRaw(
+          isFavorite: _isFavoriteContact,
+          potential: _contactPotentialQuality,
+        ),
+        'contact_notification': null,
+        'note': _mergeNote(
+          'Przełożone na ${_shortDate(date)} (${_weekdayName(date)}).',
+        ),
+      },
+      eventType: 'meeting_rescheduled',
+      eventNote: 'Spotkanie przełożone na ${_shortDate(date)}.',
+      eventMetadata: {'contact_date': _dateOnly(date)},
+    );
   }
 
   Future<DateTime?> _askPostponedDate() async {
@@ -6631,29 +7262,45 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     if (isWaitingForDecision && (reminderDate == null || !mounted)) return;
 
     if (isWaitingForDecision) {
-      await _updateContact({
-        'status': 'scheduled_meeting',
-        'meeting_result': 'interested',
-        'not_interested_reason': _meetingReasonSummary(reason, insight),
-        'contact_notification': reminderDate?.toIso8601String(),
-        'note': _mergeNote('Wynik spotkania: nie sprzedane.'),
-      });
+      await _updateContact(
+        {
+          'status': 'scheduled_meeting',
+          'meeting_result': 'interested',
+          'not_interested_reason': _meetingReasonSummary(reason, insight),
+          'contact_notification': reminderDate?.toIso8601String(),
+          'note': _mergeNote('Wynik spotkania: nie sprzedane.'),
+        },
+        eventType: 'meeting_not_sold',
+        eventNote: 'Spotkanie niesprzedane: $reason.',
+        eventMetadata: {'reason': reason, 'insight': insight},
+      );
       return;
     }
 
     final nextAction = await _askNotSoldNextAction();
     if (nextAction == null || !mounted) return;
 
-    await _updateContact({
-      'status': nextAction == 'return_to_contacts' ? 'contact' : 'meeting_done',
-      'meeting_result': 'missed',
-      'not_interested_reason': _meetingReasonSummary(reason, insight),
-      'contact_notification': null,
-      'contact_status': nextAction == 'return_to_contacts'
-          ? _contactWorkStatus
-          : null,
-      'note': _mergeNote('Wynik spotkania: nie sprzedane.'),
-    });
+    await _updateContact(
+      {
+        'status': nextAction == 'return_to_contacts'
+            ? 'contact'
+            : 'meeting_done',
+        'meeting_result': 'missed',
+        'not_interested_reason': _meetingReasonSummary(reason, insight),
+        'contact_notification': null,
+        'contact_status': nextAction == 'return_to_contacts'
+            ? _contactWorkStatus
+            : null,
+        'note': _mergeNote('Wynik spotkania: nie sprzedane.'),
+      },
+      eventType: nextAction == 'return_to_contacts'
+          ? 'meeting_returned_to_contact'
+          : 'meeting_not_sold',
+      eventNote: nextAction == 'return_to_contacts'
+          ? 'Spotkanie wróciło do kontaktów.'
+          : 'Zapamiętano spotkanie niesprzedane.',
+      eventMetadata: {'reason': reason, 'insight': insight},
+    );
   }
 
   Future<void> _finishMissedMeeting() async {
@@ -6704,13 +7351,17 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
       return;
     }
 
-    await _updateContact({
-      'status': 'meeting_done',
-      'meeting_result': 'missed',
-      'not_interested_reason': 'Nieodbyte',
-      'contact_notification': null,
-      'note': _mergeNote('Wynik spotkania: nieodbyte.'),
-    });
+    await _updateContact(
+      {
+        'status': 'meeting_done',
+        'meeting_result': 'missed',
+        'not_interested_reason': 'Nieodbyte',
+        'contact_notification': null,
+        'note': _mergeNote('Wynik spotkania: nieodbyte.'),
+      },
+      eventType: 'meeting_missed',
+      eventNote: 'Zapamiętano spotkanie nieodbyte.',
+    );
   }
 
   Future<void> _finishSignedContract() async {
@@ -6753,6 +7404,13 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
       final updatedContact = Contact.fromMap(
         Map<String, dynamic>.from(updatedData),
       );
+      await _logContactEvent(
+        contact: updatedContact,
+        eventType: 'contract_signed',
+        eventNote: 'Spisano umowę i przeniesiono kontakt do realizacji.',
+        metadata: {'previous_status': contact.status},
+      );
+      if (!mounted) return;
       Navigator.of(context).pop(updatedContact);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Kontakt przeniesiony do W realizacji.')),
@@ -6909,6 +7567,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     );
     if (picked == null) return;
     setState(() => _contactDate = picked);
+    unawaited(_saveContactDetailsInline());
   }
 
   Future<void> _pickContactTime() async {
@@ -6918,6 +7577,7 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     );
     if (picked == null) return;
     setState(() => _contactTime = picked);
+    unawaited(_saveContactDetailsInline());
   }
 
   Future<void> _toggleContactType(ContactStatus type) async {
@@ -6988,12 +7648,32 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _nameController.text.trim().isEmpty
-                            ? 'Bez nazwy'
-                            : _nameController.text.trim(),
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              _nameController.text.trim().isEmpty
+                                  ? 'Bez nazwy'
+                                  : _nameController.text.trim(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () =>
+                                _changeFavoriteContact(!_isFavoriteContact),
+                            child: Padding(
+                              padding: const EdgeInsets.all(2),
+                              child: _FavoriteContactStar(
+                                isFavorite: _isFavoriteContact,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       if (isMeeting &&
                           contact.contactDate != null &&
@@ -7020,7 +7700,11 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
                   children: [
                     IconButton(
                       tooltip: 'Zamknij',
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () async {
+                        await _flushContactDetailsAutosave();
+                        if (!context.mounted) return;
+                        Navigator.of(context).pop(_latestSavedContact);
+                      },
                       icon: const Icon(Icons.close),
                     ),
                   ],
@@ -7076,30 +7760,51 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
             const SizedBox(height: 18),
             TextField(
               controller: _nameController,
-              decoration: const InputDecoration(labelText: 'Imię i nazwisko'),
-              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(hintText: 'Imię i nazwisko'),
+              onChanged: (_) {
+                setState(() {});
+                _queueContactDetailsAutosave();
+              },
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _phoneController,
               keyboardType: TextInputType.phone,
-              decoration: const InputDecoration(labelText: 'Nr telefonu'),
-              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(hintText: 'Nr telefonu'),
+              onChanged: (_) {
+                setState(() {});
+                _queueContactDetailsAutosave();
+              },
             ),
             const SizedBox(height: 12),
             TextField(
               controller: _addressController,
-              decoration: const InputDecoration(labelText: 'Adres'),
-              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(hintText: 'Adres'),
+              onChanged: (_) {
+                setState(() {});
+                _queueContactDetailsAutosave();
+              },
             ),
 
             if (!isMeeting) ...[
               const SizedBox(height: 12),
-              _StatusPickerField(
-                stage: 'contact',
-                value: _contactWorkStatus,
-                onChanged: (value) =>
-                    setState(() => _contactWorkStatus = value),
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatusPickerField(
+                      stage: 'contact',
+                      value: _contactWorkStatus,
+                      onChanged: _changeContactWorkStatus,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _ContactPotentialQualityPicker(
+                      value: _contactPotentialQuality,
+                      onChanged: _changeContactPotentialQuality,
+                    ),
+                  ),
+                ],
               ),
             ],
             if (isMeeting) ...[
@@ -7107,12 +7812,8 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
               _MeetingFields(
                 date: _contactDate,
                 time: _contactTime,
-                quality: _contactQuality,
                 onPickDate: _pickContactDate,
                 onPickTime: _pickContactTime,
-                onQualityChanged: (value) {
-                  setState(() => _contactQuality = value);
-                },
               ),
             ],
             const SizedBox(height: 12),
@@ -7120,18 +7821,150 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
               controller: _noteController,
               minLines: 3,
               maxLines: 6,
-              decoration: const InputDecoration(labelText: 'Uwagi / notatki'),
+              decoration: const InputDecoration(hintText: 'Uwagi / notatki'),
+              onChanged: (_) => _queueContactDetailsAutosave(),
             ),
-            const SizedBox(height: 10),
-            FilledButton(
-              onPressed: _isSaving ? null : _save,
-              child: Text(_isSaving ? 'Zapisuję...' : 'Zapisz zmiany'),
-            ),
+            if (_isAutosaving) ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(minHeight: 2),
+            ],
+            const SizedBox(height: 18),
+            _ContactEventsTimeline(contactId: contact.id),
           ],
         ),
       ),
     );
   }
+}
+
+class _ContactEventsTimeline extends StatelessWidget {
+  const _ContactEventsTimeline({required this.contactId});
+
+  final String contactId;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<ContactEvent>>(
+      future: _fetchContactEvents(contactId),
+      builder: (context, snapshot) {
+        final events = snapshot.data ?? const <ContactEvent>[];
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: appSurfaceSoft,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: appBorder),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Historia zdarzeń kontaktu',
+                style: TextStyle(
+                  color: appTextPrimary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              if (snapshot.connectionState == ConnectionState.waiting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 8),
+                  child: LinearProgressIndicator(minHeight: 2),
+                )
+              else if (events.isEmpty)
+                const Text(
+                  'Historia zacznie się zapisywać od kolejnych akcji.',
+                  style: TextStyle(color: appTextSecondary, fontSize: 12),
+                )
+              else
+                for (final event in events) _ContactEventRow(event: event),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ContactEventRow extends StatelessWidget {
+  const _ContactEventRow({required this.event});
+
+  final ContactEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            margin: const EdgeInsets.only(top: 5),
+            decoration: const BoxDecoration(
+              color: appBrand,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _contactEventTimeText(event.createdAt),
+                  style: const TextStyle(
+                    color: appTextSecondary,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  event.eventNote.isEmpty
+                      ? _contactEventFallbackLabel(event.eventType)
+                      : event.eventNote,
+                  style: const TextStyle(
+                    color: appTextPrimary,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+String _contactEventTimeText(DateTime? date) {
+  if (date == null) return 'Bez daty';
+  final local = date.toLocal();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '${_shortDate(local)} $hour:$minute';
+}
+
+String _contactEventFallbackLabel(String eventType) {
+  return switch (eventType) {
+    'contact_created' => 'Utworzono kontakt.',
+    'contact_updated' => 'Zaktualizowano kontakt.',
+    'contact_type_changed' => 'Zmieniono typ kontaktu.',
+    'contact_status_changed' => 'Zmieniono status kontaktu.',
+    'meeting_scheduled' => 'Umówiono spotkanie.',
+    'meeting_rescheduled' => 'Przełożono spotkanie.',
+    'meeting_not_sold' => 'Spotkanie niesprzedane.',
+    'meeting_missed' => 'Spotkanie nieodbyte.',
+    'contract_signed' => 'Spisano umowę.',
+    'contact_hidden' => 'Kontakt usunięty z aktywnego widoku.',
+    _ => 'Zdarzenie kontaktu.',
+  };
 }
 
 class _DetailRow extends StatelessWidget {
@@ -7192,7 +8025,7 @@ class _MeetingActionPanel extends StatelessWidget {
         Expanded(
           child: _MeetingQuickActionTile(
             label: 'Sprzedane',
-            icon: Icons.check,
+            icon: Icons.check_circle_outline,
             color: appSuccess,
             onTap: onSold,
           ),
@@ -7210,7 +8043,7 @@ class _MeetingActionPanel extends StatelessWidget {
         Expanded(
           child: _MeetingQuickActionTile(
             label: 'Przełożone',
-            icon: Icons.arrow_forward_rounded,
+            icon: Icons.redo_rounded,
             color: appInfo,
             onTap: onPostpone,
           ),
@@ -7219,7 +8052,7 @@ class _MeetingActionPanel extends StatelessWidget {
         Expanded(
           child: _MeetingQuickActionTile(
             label: 'Nieodbyte',
-            icon: Icons.close,
+            icon: Icons.cancel_outlined,
             color: appDanger,
             onTap: onMissed,
           ),
@@ -7244,38 +8077,23 @@ class _MeetingQuickActionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AspectRatio(
-      aspectRatio: 1,
-      child: Material(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
+    return SizedBox(
+      height: 46,
+      child: Tooltip(
+        message: label,
+        child: Material(
+          color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(8),
-          onTap: onTap,
-          child: Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: color.withValues(alpha: 0.35)),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: color, size: 24),
-                const SizedBox(height: 6),
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: color,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    height: 1.05,
-                  ),
-                ),
-              ],
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: color.withValues(alpha: 0.35)),
+              ),
+              child: Center(child: Icon(icon, color: color, size: 25)),
             ),
           ),
         ),
@@ -7663,6 +8481,29 @@ class _AccountPageState extends State<AccountPage> {
   bool _productWindTurbines = false;
   int _defaultLeadGoal = 9;
 
+  @override
+  void initState() {
+    super.initState();
+    _loadWorkSystemPreferences();
+  }
+
+  Future<void> _loadWorkSystemPreferences() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _leadCycleCount = preferences.getInt(_leadCycleCountPreferenceKey) ?? 2;
+      _defaultLeadGoal = preferences.getInt(_defaultLeadGoalPreferenceKey) ?? 9;
+    });
+  }
+
+  Future<void> _setLeadCycleCount(int value) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setInt(_leadCycleCountPreferenceKey, value);
+    _leadCycleCountNotifier.value = value;
+    if (!mounted) return;
+    setState(() => _leadCycleCount = value);
+  }
+
   void _pushAccountPage(Widget page) {
     _pushSettingsSubpage(context, page);
   }
@@ -7882,18 +8723,16 @@ class _AccountPageState extends State<AccountPage> {
                                     children: [
                                       Expanded(
                                         child: OutlinedButton(
-                                          onPressed: () => setState(
-                                            () => _leadCycleCount = 2,
-                                          ),
+                                          onPressed: () =>
+                                              _setLeadCycleCount(2),
                                           child: const Text('2 cykle'),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: OutlinedButton(
-                                          onPressed: () => setState(
-                                            () => _leadCycleCount = 3,
-                                          ),
+                                          onPressed: () =>
+                                              _setLeadCycleCount(3),
                                           child: const Text('3 cykle'),
                                         ),
                                       ),
@@ -8049,7 +8888,17 @@ class _SettingsPanelCloseButton extends StatelessWidget {
 }
 
 class ContactStatusesPage extends StatelessWidget {
-  const ContactStatusesPage({super.key});
+  const ContactStatusesPage({super.key, this.closeToContactDetails = false});
+
+  final bool closeToContactDetails;
+
+  void _close(BuildContext context) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    if (closeToContactDetails && navigator.canPop()) {
+      navigator.pop();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -8066,6 +8915,13 @@ class ContactStatusesPage extends StatelessWidget {
           'Kontakty',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Zamknij',
+            onPressed: () => _close(context),
+            icon: const Icon(Icons.close),
+          ),
+        ],
         bottom: const PreferredSize(
           preferredSize: Size.fromHeight(1),
           child: Divider(height: 1, thickness: 1, color: appBorder),
@@ -9774,7 +10630,9 @@ Future<void> _deleteUnprocessedMeeting(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Usunąć spotkanie?'),
-      content: const Text('Ten kontakt zostanie usunięty na stałe.'),
+      content: const Text(
+        'Kontakt zniknie z aktywnych list, ale zostanie w historii.',
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
@@ -9790,7 +10648,10 @@ Future<void> _deleteUnprocessedMeeting(
   );
 
   if (confirmed != true) return;
-  await _supabase.from('contacts').delete().eq('id', contact.id);
+  await _hideContactFromActiveWork(
+    contact,
+    'Nierozliczone spotkanie usunięte z aktywnej pracy.',
+  );
 }
 
 String _mergeContactNote(String currentNote, String addition) {
@@ -10201,7 +11062,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
   final List<String> _contactTypes = [];
   DateTime _contactDate = DateTime.now().add(const Duration(days: 1));
   TimeOfDay _contactTime = const TimeOfDay(hour: 18, minute: 0);
-  String? _contactQuality;
   bool _isSaving = false;
 
   @override
@@ -10238,18 +11098,19 @@ class _AddContactSheetState extends State<AddContactSheet> {
         _showError('Kontakt z tym numerem telefonu juz istnieje.');
         return;
       }
+      final isContactStage = _stageForContactStatus(_status) == 'contact';
+      final effectiveWorkStatus =
+          isContactStage && _contactTypes.isEmpty && _contactWorkStatus == null
+          ? 'working'
+          : _contactWorkStatus;
 
       final payload = <String, dynamic>{
         'agent_id': user.id,
         'contact_name': _nameController.text.trim(),
         'phone': phone,
         'address': _addressController.text.trim(),
-        'status': _stageForContactStatus(_status) == 'contact'
-            ? 'contact'
-            : _status,
-        'contact_status': _stageForContactStatus(_status) == 'contact'
-            ? _contactWorkStatus
-            : null,
+        'status': isContactStage ? 'contact' : _status,
+        'contact_status': isContactStage ? effectiveWorkStatus : null,
         'note': _noteController.text.trim(),
       };
 
@@ -10258,7 +11119,6 @@ class _AddContactSheetState extends State<AddContactSheet> {
           'contact_date': _dateOnly(_contactDate),
           'contact_time': _timeOnly(_contactTime),
           'meeting_time': _timeOnly(_contactTime),
-          'contact_quality': _contactQuality,
         });
       }
 
@@ -10266,7 +11126,21 @@ class _AddContactSheetState extends State<AddContactSheet> {
         payload['contact_type'] = _contactTypeValuesToRaw(_contactTypes);
       }
 
-      await _insertContactPayload(payload);
+      final savedContact = await _insertContactPayload(payload);
+      await _logContactEvent(
+        contact: savedContact,
+        eventType: _stageForContactStatus(_status) == 'meeting'
+            ? 'meeting_scheduled'
+            : 'contact_created',
+        eventNote: _stageForContactStatus(_status) == 'meeting'
+            ? 'Umówiono spotkanie.'
+            : 'Utworzono kontakt.',
+        metadata: {
+          'status': savedContact.status,
+          'contact_date': savedContact.contactDate?.toIso8601String(),
+          'contact_time': savedContact.contactTime,
+        },
+      );
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -10282,9 +11156,14 @@ class _AddContactSheetState extends State<AddContactSheet> {
     }
   }
 
-  Future<void> _insertContactPayload(Map<String, dynamic> payload) async {
+  Future<Contact> _insertContactPayload(Map<String, dynamic> payload) async {
     try {
-      await _supabase.from('contacts').insert(payload);
+      final data = await _supabase
+          .from('contacts')
+          .insert(payload)
+          .select()
+          .single();
+      return Contact.fromMap(Map<String, dynamic>.from(data));
     } on PostgrestException catch (error) {
       final canRetryWithoutContactType =
           payload.containsKey('contact_type') &&
@@ -10293,7 +11172,12 @@ class _AddContactSheetState extends State<AddContactSheet> {
 
       final fallbackPayload = Map<String, dynamic>.from(payload)
         ..remove('contact_type');
-      await _supabase.from('contacts').insert(fallbackPayload);
+      final data = await _supabase
+          .from('contacts')
+          .insert(fallbackPayload)
+          .select()
+          .single();
+      return Contact.fromMap(Map<String, dynamic>.from(data));
     }
   }
 
@@ -10429,7 +11313,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
               const SizedBox(height: 10),
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Imię i nazwisko'),
+                decoration: const InputDecoration(hintText: 'Imię i nazwisko'),
                 validator: (value) {
                   if (_status == 'scheduled_meeting' &&
                       (value ?? '').trim().isEmpty) {
@@ -10442,12 +11326,12 @@ class _AddContactSheetState extends State<AddContactSheet> {
               TextFormField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(labelText: 'Nr telefonu'),
+                decoration: const InputDecoration(hintText: 'Nr telefonu'),
               ),
               const SizedBox(height: 12),
               TextFormField(
                 controller: _addressController,
-                decoration: const InputDecoration(labelText: 'Adres'),
+                decoration: const InputDecoration(hintText: 'Adres'),
               ),
               const SizedBox(height: 12),
               _ContactTypeSelector(
@@ -10470,12 +11354,8 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 _MeetingFields(
                   date: _contactDate,
                   time: _contactTime,
-                  quality: _contactQuality,
                   onPickDate: _pickContactDate,
                   onPickTime: _pickContactTime,
-                  onQualityChanged: (value) {
-                    setState(() => _contactQuality = value);
-                  },
                 ),
               ],
               const SizedBox(height: 12),
@@ -10483,7 +11363,7 @@ class _AddContactSheetState extends State<AddContactSheet> {
                 controller: _noteController,
                 minLines: 3,
                 maxLines: 5,
-                decoration: const InputDecoration(labelText: 'Uwagi / notatki'),
+                decoration: const InputDecoration(hintText: 'Uwagi / notatki'),
                 validator: (value) {
                   final phone = _phoneController.text.trim();
                   final address = _addressController.text.trim();
@@ -10527,18 +11407,14 @@ class _MeetingFields extends StatelessWidget {
   const _MeetingFields({
     required this.date,
     required this.time,
-    required this.quality,
     required this.onPickDate,
     required this.onPickTime,
-    required this.onQualityChanged,
   });
 
   final DateTime date;
   final TimeOfDay time;
-  final String? quality;
   final VoidCallback onPickDate;
   final VoidCallback onPickTime;
-  final ValueChanged<String?> onQualityChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -10563,18 +11439,40 @@ class _MeetingFields extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 12),
-        DropdownButtonFormField<String>(
-          initialValue: quality,
-          decoration: const InputDecoration(labelText: 'Jakość'),
-          items: [
-            const DropdownMenuItem(value: null, child: Text('?')),
-            for (final item in _qualities)
-              DropdownMenuItem(value: item, child: Text(item)),
-          ],
-          onChanged: onQualityChanged,
-        ),
       ],
+    );
+  }
+}
+
+class _ContactPotentialQualityPicker extends StatelessWidget {
+  const _ContactPotentialQualityPicker({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final String? value;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final safeValue = _contactQualityValues.contains(value) ? value : null;
+
+    return DropdownButtonFormField<String>(
+      initialValue: safeValue,
+      decoration: const InputDecoration(labelText: 'Jakość'),
+      items: [
+        const DropdownMenuItem(value: null, child: Text('Brak')),
+        for (final item in _contactQualityValues)
+          DropdownMenuItem(
+            value: item,
+            child: Text(
+              _contactQualityLabels[item]!,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+            ),
+          ),
+      ],
+      onChanged: onChanged,
     );
   }
 }
